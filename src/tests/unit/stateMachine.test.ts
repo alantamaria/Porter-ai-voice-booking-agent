@@ -2,8 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createInitialBookingState,
-  reduceBookingState,
-  calculateCompletion
+  reduceBookingState
 } from '../../lib/state/stateMachine';
 import { ExtractorDelta } from '../../types/booking';
 

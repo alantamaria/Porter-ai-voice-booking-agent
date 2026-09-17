@@ -43,12 +43,13 @@ export async function POST(req: NextRequest) {
     };
 
     return NextResponse.json(responsePayload);
-  } catch (error: any) {
-    console.error('Chat API error:', error);
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error('Chat API error:', err);
     return NextResponse.json(
       {
         error: 'Failed to process voice turn',
-        details: error?.message || 'Unknown error'
+        details: err?.message || 'Unknown error'
       },
       { status: 500 }
     );

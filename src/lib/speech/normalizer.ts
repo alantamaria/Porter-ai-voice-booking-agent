@@ -122,10 +122,7 @@ export function normalizeLocation(input: string): string {
   for (const [misspelling, canonical] of sortedEntries) {
     // If canonical is already in the string at that position, don't replace
     const regex = new RegExp(`\\b${misspelling.replace(/\s+/g, '\\s+')}\\b`, 'gi');
-    cleaned = cleaned.replace(regex, (match) => {
-      // If already equal to canonical case-insensitively, keep canonical casing
-      return canonical;
-    });
+    cleaned = cleaned.replace(regex, () => canonical);
   }
 
   // Clean any accidental duplicate word artifacts like "HSR Layout Layout" -> "HSR Layout"

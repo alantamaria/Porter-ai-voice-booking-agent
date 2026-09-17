@@ -3,16 +3,41 @@
  * Supports barge-in, voice selection, silence timeout, and fallback.
  */
 
-// Extend window for WebkitSpeechRecognition
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: {
+      isFinal: boolean;
+      [index: number]: { transcript: string };
+    };
+  };
+}
+
+interface SpeechRecognitionErrorEventLike {
+  error: string;
+}
+
+interface SpeechRecognitionInstance {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
 declare global {
   interface Window {
-    webkitSpeechRecognition: any;
-    SpeechRecognition: any;
+    webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+    SpeechRecognition?: new () => SpeechRecognitionInstance;
   }
 }
 
 export class ClientVoiceManager {
-  private recognition: any = null;
+  private recognition: SpeechRecognitionInstance | null = null;
   private isListening: boolean = false;
   private isSpeaking: boolean = false;
   private silenceTimer: NodeJS.Timeout | null = null;
@@ -22,14 +47,14 @@ export class ClientVoiceManager {
 
   constructor() {
     if (typeof window !== 'undefined') {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (SpeechRecognition) {
-        this.recognition = new SpeechRecognition();
+      const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRecognitionClass) {
+        this.recognition = new SpeechRecognitionClass();
         this.recognition.continuous = false;
         this.recognition.interimResults = true;
         this.recognition.lang = 'en-IN'; // Indian English default for Porter
 
-        this.recognition.onresult = (event: any) => {
+        this.recognition.onresult = (event: SpeechRecognitionEventLike) => {
           this.resetSilenceTimer();
           let interim = '';
           let final = '';
@@ -49,7 +74,7 @@ export class ClientVoiceManager {
           }
         };
 
-        this.recognition.onerror = (event: any) => {
+        this.recognition.onerror = (event: SpeechRecognitionErrorEventLike) => {
           console.warn('Speech recognition error:', event.error);
           this.isListening = false;
           if (this.onErrorCallback) {
@@ -99,7 +124,7 @@ export class ClientVoiceManager {
     if (this.recognition && this.isListening) {
       try {
         this.recognition.stop();
-      } catch (e) {
+      } catch {
         // ignore
       }
     }

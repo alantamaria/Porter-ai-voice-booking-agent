@@ -59,9 +59,10 @@ export async function POST(req: NextRequest) {
       },
       { status: 501 }
     );
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const error = err as Error;
     return NextResponse.json(
-      { error: 'Transcription failed', details: err?.message },
+      { error: 'Transcription failed', details: error?.message },
       { status: 500 }
     );
   }

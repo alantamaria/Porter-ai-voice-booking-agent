@@ -20,8 +20,10 @@ export default function Home() {
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [manualModalOpen, setManualModalOpen] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
+
+  const isModalOpen = manualModalOpen || bookingState.phase === 'BOOKING_CONFIRMED';
 
   const voiceManagerRef = useRef<ClientVoiceManager | null>(null);
 
@@ -33,13 +35,6 @@ export default function Home() {
       voiceManagerRef.current?.stopSpeaking();
     };
   }, []);
-
-  // Check if booking transitioned to review or confirmed
-  useEffect(() => {
-    if (bookingState.phase === 'BOOKING_CONFIRMED') {
-      setIsModalOpen(true);
-    }
-  }, [bookingState.phase]);
 
   // Core turn sender: Dispatches user text to /api/chat
   const handleSendMessage = async (text: string) => {
@@ -101,8 +96,9 @@ export default function Home() {
           setIsAgentSpeaking(false);
         });
       }
-    } catch (err: any) {
-      console.error('Chat error:', err);
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error('Chat error:', error);
       const errorTurn: MessageTurn = {
         id: `turn-error-${Date.now()}`,
         role: 'agent',
@@ -182,7 +178,7 @@ export default function Home() {
     setHistory([]);
     setInterimTranscript('');
     setMicError(null);
-    setIsModalOpen(false);
+    setManualModalOpen(false);
   };
 
   return (
@@ -262,7 +258,7 @@ export default function Home() {
         <section className="right-panel">
           <BookingCard
             state={bookingState}
-            onConfirmClick={() => setIsModalOpen(true)}
+            onConfirmClick={() => setManualModalOpen(true)}
           />
 
           <NegativePathBadges
@@ -275,7 +271,7 @@ export default function Home() {
       <ConfirmationModal
         isOpen={isModalOpen}
         state={bookingState}
-        onClose={() => setIsModalOpen(false)}
+        onClose={() => setManualModalOpen(false)}
         onReset={handleResetConversation}
       />
     </main>

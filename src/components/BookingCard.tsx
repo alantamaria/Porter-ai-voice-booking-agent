@@ -126,7 +126,7 @@ export const BookingCard: React.FC<BookingCardProps> = ({ state, onConfirmClick 
         {inventory.items.length === 0 ? (
           <div className="empty-inventory">
             {inventory.isVague ? (
-              <span className="text-warning">Vague description provided ("a few things"). Needs specifics.</span>
+              <span className="text-warning">Vague description provided (&quot;a few things&quot;). Needs specifics.</span>
             ) : (
               <span className="text-muted">No items added yet. Speak your items to add them.</span>
             )}

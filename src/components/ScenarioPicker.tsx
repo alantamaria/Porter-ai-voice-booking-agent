@@ -63,7 +63,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({ onSelectScenario
               <span className="scenario-btn-title">{sc.title}</span>
               <Play className="icon-xs scenario-play-icon" />
             </div>
-            <p className="scenario-btn-quote">"{sc.text}"</p>
+            <p className="scenario-btn-quote">&ldquo;{sc.text}&rdquo;</p>
             <span className="scenario-btn-desc">{sc.description}</span>
           </button>
         ))}

@@ -1,6 +1,6 @@
 import { BookingState, ExtractorDelta, MessageTurn } from '@/types/booking';
 import { EXTRACTOR_SYSTEM_PROMPT, SYNTHESIZER_SYSTEM_PROMPT } from './prompts';
-import { normalizeLocation, parseFloorAndLift, parseRelativeDate, isInventoryDescriptionVague } from '@/lib/speech/normalizer';
+import { normalizeLocation, parseFloorAndLift, isInventoryDescriptionVague } from '@/lib/speech/normalizer';
 import { checkHazardousItem, KNOWN_ITEM_CATALOG } from '@/lib/validation/rules';
 
 /**
@@ -43,8 +43,7 @@ async function callOpenAICompatible(
  */
 function localDeterministicExtractor(
   userUtterance: string,
-  currentState: BookingState,
-  history: MessageTurn[]
+  currentState: BookingState
 ): ExtractorDelta {
   const text = userUtterance.trim();
   const lower = text.toLowerCase();
@@ -84,7 +83,6 @@ function localDeterministicExtractor(
 
   // 4. Correction detection
   // e.g. "actually make it Indiranagar", "not Koramangala", "change pickup to..."
-  const correctionMatches = lower.match(/(?:actually|no wait|change|not|instead of)\s+([a-z0-9\s]+?)(?:,\s*make it|\s+to|\s+instead|\s*$)/i);
   if (lower.includes('actually') || lower.includes('not ') || lower.includes('instead') || lower.includes('change')) {
     delta.userIntent = 'MAKING_CORRECTION';
     // If user says "not Koramangala, Indiranagar" or "change pickup to Indiranagar"
@@ -266,8 +264,6 @@ function localDeterministicSynthesizer(
   }
 
   // 8. Missing Fields progression (Natural conversational bundling)
-  const missing = state.metadata.missingMandatoryFields;
-
   if (!state.pickup.normalizedLocation && !state.dropoff.normalizedLocation) {
     return `${prefix}Hello! Welcome to Porter. Where would you like to move your items from, and what is the destination?`;
   }
@@ -365,7 +361,7 @@ LATEST USER UTTERANCE:
   }
 
   // 3. Resilient Deterministic Local Extractor (Guarantees zero failure during eval)
-  const localDelta = localDeterministicExtractor(userUtterance, currentState, history);
+  const localDelta = localDeterministicExtractor(userUtterance, currentState);
   return { delta: localDelta, modelUsed: 'local-deterministic-guardrail' };
 }
 

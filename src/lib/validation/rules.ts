@@ -1,6 +1,23 @@
-import { VehicleType, CargoCategory, CargoSize, InventoryItem, LocationDetail } from '@/types/booking';
+import {
+  BookingState,
+  CargoCategory,
+  CargoSize,
+  InventoryItem,
+  LocationDetail,
+  VehicleType
+} from '@/types/booking';
 
-// Common cargo item dimensions and default weights for Porter sizing
+/**
+ * ==============================================================================
+ * DEMO / ASSUMPTION VEHICLE SIZING RULES (For Assessment Demonstration Only)
+ * ==============================================================================
+ * Note: The cargo volume ratings, vehicle classifications, and pricing heuristics
+ * below are simplified demonstration assumptions for this technical assessment.
+ * They do NOT represent official Porter operational policies, capacity rules,
+ * or commercial tariffs.
+ * ==============================================================================
+ */
+
 export const KNOWN_ITEM_CATALOG: Record<string, { category: CargoCategory; size: CargoSize; volumeCuFt: number; weightKg: number }> = {
   // Furniture
   'double bed': { category: 'FURNITURE', size: 'LARGE', volumeCuFt: 60, weightKg: 70 },
@@ -66,7 +83,242 @@ const PROHIBITED_KEYWORDS = [
 ];
 
 /**
- * Checks whether an item name contains prohibited or hazardous goods
+ * SECTION 6.A: Past-Date Validation
+ * Checks whether a booking date is valid and strictly >= current calendar date.
+ */
+export function validateBookingDate(
+  dateStr: string,
+  baseDate: Date = new Date()
+): { isValid: boolean; isPast: boolean; isoDate?: string; error?: string } {
+  if (!dateStr || !dateStr.trim()) {
+    return { isValid: false, isPast: false, error: 'Booking date is required.' };
+  }
+
+  const todayZero = new Date(baseDate);
+  todayZero.setHours(0, 0, 0, 0);
+
+  const lower = dateStr.toLowerCase().trim();
+  const target = new Date(baseDate);
+
+  if (lower.includes('yesterday') || lower.includes('day before yesterday')) {
+    target.setDate(target.getDate() - 1);
+    const iso = target.toISOString().split('T')[0];
+    return {
+      isValid: false,
+      isPast: true,
+      isoDate: iso,
+      error: `Booking date (${iso}) cannot be in the past.`
+    };
+  }
+
+  if (lower.includes('day after tomorrow')) {
+    target.setDate(target.getDate() + 2);
+  } else if (lower.includes('tomorrow')) {
+    target.setDate(target.getDate() + 1);
+  } else if (lower.includes('today') || lower.includes('tonight')) {
+    // today is valid
+  } else {
+    const parsed = new Date(dateStr);
+    if (isNaN(parsed.getTime())) {
+      return { isValid: false, isPast: false, error: 'Invalid date format.' };
+    }
+    const parsedZero = new Date(parsed);
+    parsedZero.setHours(0, 0, 0, 0);
+    const iso = parsed.toISOString().split('T')[0];
+    const isPast = parsedZero.getTime() < todayZero.getTime();
+    return {
+      isValid: !isPast,
+      isPast,
+      isoDate: iso,
+      error: isPast ? `Booking date (${iso}) cannot be in the past.` : undefined
+    };
+  }
+
+  const iso = target.toISOString().split('T')[0];
+  const targetZero = new Date(target);
+  targetZero.setHours(0, 0, 0, 0);
+  const isPast = targetZero.getTime() < todayZero.getTime();
+
+  return {
+    isValid: !isPast,
+    isPast,
+    isoDate: iso,
+    error: isPast ? `Booking date (${iso}) cannot be in the past.` : undefined
+  };
+}
+
+/**
+ * SECTION 6.B: Same-Location Validation
+ * Validates that pickup and dropoff are distinct locations once both are provided.
+ */
+export function validateSameLocation(
+  pickup?: string,
+  dropoff?: string
+): { isValid: boolean; error?: string } {
+  if (pickup && dropoff) {
+    const cleanPickup = pickup.trim().toLowerCase();
+    const cleanDropoff = dropoff.trim().toLowerCase();
+    if (cleanPickup === cleanDropoff) {
+      return {
+        isValid: false,
+        error: 'Pickup and dropoff locations cannot be identical.'
+      };
+    }
+  }
+  return { isValid: true };
+}
+
+/**
+ * SECTION 6.C: Floor & Elevator Validation
+ * Validates that if a floor is provided, elevator presence is explicitly known rather than guessed.
+ */
+export function validateFloorElevator(
+  floor?: number | null,
+  hasElevator?: boolean | null
+): { isValid: boolean; explicitStatusNeeded: boolean; error?: string } {
+  // Ground floor or basement doesn't strictly need elevator for short flights
+  if (floor === undefined || floor === null || floor === 0) {
+    return { isValid: true, explicitStatusNeeded: false };
+  }
+
+  // If floor is > 0 and hasElevator is null, explicit confirmation is needed
+  if (floor > 0 && (hasElevator === null || hasElevator === undefined)) {
+    return {
+      isValid: false,
+      explicitStatusNeeded: true,
+      error: `Elevator availability must be explicitly specified for floor ${floor}.`
+    };
+  }
+
+  return { isValid: true, explicitStatusNeeded: false };
+}
+
+/**
+ * SECTION 6.D: Inventory Vague Description Detection
+ */
+export function isInventoryVague(textOrItems: string | InventoryItem[]): boolean {
+  if (Array.isArray(textOrItems)) {
+    if (textOrItems.length === 0) return true;
+    return textOrItems.some(i => i.name.toLowerCase().includes('few things') || i.name.toLowerCase().includes('stuff'));
+  }
+
+  if (typeof textOrItems === 'string') {
+    const lower = textOrItems.toLowerCase().trim();
+    const vaguePhrases = [
+      'a few things',
+      'few things',
+      'some things',
+      'some items',
+      'some stuff',
+      'some furniture',
+      'a couple of things',
+      'household items',
+      'luggage',
+      'not much',
+      'just stuff',
+      'random things'
+    ];
+    for (const phrase of vaguePhrases) {
+      if (lower === phrase || lower.includes(phrase)) {
+        const specificKeywords = [
+          'bed', 'sofa', 'fridge', 'refrigerator', 'tv', 'table',
+          'chair', 'box', 'boxes', 'wardrobe', 'almirah', 'washing machine', 'bike'
+        ];
+        const hasSpecific = specificKeywords.some(k => lower.includes(k));
+        if (!hasSpecific) return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * SECTION 6.E & 7: Mandatory Information & Completeness Check
+ * Returns the exact list of missing information still required before review.
+ */
+export function getMissingMandatoryFields(state: BookingState): string[] {
+  const missing: string[] = [];
+
+  // 1. Pickup location
+  if (!state.pickup.normalizedLocation || state.pickup.normalizedLocation.trim().length === 0) {
+    missing.push('pickup');
+  }
+
+  // 2. Dropoff location
+  if (!state.dropoff.normalizedLocation || state.dropoff.normalizedLocation.trim().length === 0) {
+    missing.push('dropoff');
+  }
+
+  // 3. Booking Date
+  if (!state.schedule.parsedDate || state.schedule.isPastDate || !state.schedule.isValid) {
+    missing.push('date');
+  }
+
+  // 4. Booking Time Window
+  if (!state.schedule.parsedTimeSlot || state.schedule.parsedTimeSlot.trim().length === 0) {
+    missing.push('time');
+  }
+
+  // 5. Inventory Items (concrete, non-empty, non-vague)
+  if (state.inventory.items.length === 0 || state.inventory.isVague) {
+    missing.push('items');
+  }
+
+  // 6. Floor & Elevator accessibility
+  const pickupElevatorCheck = validateFloorElevator(state.pickup.floor, state.pickup.hasElevator);
+  const dropoffElevatorCheck = validateFloorElevator(state.dropoff.floor, state.dropoff.hasElevator);
+  if (pickupElevatorCheck.explicitStatusNeeded || dropoffElevatorCheck.explicitStatusNeeded) {
+    missing.push('elevator_access');
+  }
+
+  return missing;
+}
+
+/**
+ * SECTION 7: Booking Completeness Check
+ * Deterministic function returning true ONLY when all required fields are present,
+ * valid, and no blocking uncertainties exist.
+ */
+export function isBookingComplete(state: BookingState): boolean {
+  // 1. Must have zero missing mandatory fields
+  const missing = getMissingMandatoryFields(state);
+  if (missing.length > 0) {
+    return false;
+  }
+
+  // 2. Must have no blocking uncertainties
+  const hasBlockingUncertainty = state.metadata.uncertainties.some(
+    u => u.severity === 'BLOCKING'
+  );
+  if (hasBlockingUncertainty) {
+    return false;
+  }
+
+  // 3. Same location check
+  const sameLoc = validateSameLocation(
+    state.pickup.normalizedLocation,
+    state.dropoff.normalizedLocation
+  );
+  if (!sameLoc.isValid) {
+    return false;
+  }
+
+  // 4. Date must not be in the past
+  if (state.schedule.isPastDate || !state.schedule.isValid) {
+    return false;
+  }
+
+  // 5. Inventory must not be vague
+  if (state.inventory.isVague || state.inventory.items.length === 0) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Prohibited / Hazardous Cargo Checker
  */
 export function checkHazardousItem(itemName: string): { isHazardous: boolean; reason?: string } {
   const lower = itemName.toLowerCase();
@@ -82,7 +334,14 @@ export function checkHazardousItem(itemName: string): { isHazardous: boolean; re
 }
 
 /**
- * Calculates Porter vehicle recommendation based on total volume and weight
+ * Route Validation (Alias for same location and serviceability)
+ */
+export function validateRoute(pickup: LocationDetail, dropoff: LocationDetail): { isValid: boolean; error?: string } {
+  return validateSameLocation(pickup.normalizedLocation, dropoff.normalizedLocation);
+}
+
+/**
+ * SECTION 10: Vehicle Recommendation Heuristic (Demo / Assumption Layer)
  */
 export function calculateRecommendedVehicle(items: InventoryItem[]): {
   vehicle: VehicleType;
@@ -99,7 +358,6 @@ export function calculateRecommendedVehicle(items: InventoryItem[]): {
     totalWeight += item.approxWeightKg * item.quantity;
   }
 
-  // Sizing tiers
   if (totalVolume === 0 && totalWeight === 0) {
     return {
       vehicle: 'TATA_ACE',
@@ -113,7 +371,7 @@ export function calculateRecommendedVehicle(items: InventoryItem[]): {
   if (totalWeight > 2500 || totalVolume > 600) {
     return {
       vehicle: 'UNSERVICEABLE_OVERLOAD',
-      displayName: 'Exceeds Standard Porter Fleet (Over 2.5 Tons)',
+      displayName: 'Exceeds Standard Fleet (Over 2.5 Tons)',
       totalVolume,
       totalWeight,
       baseFareInr: 0
@@ -170,7 +428,7 @@ export function calculateRecommendedVehicle(items: InventoryItem[]): {
 }
 
 /**
- * Calculates helper crew requirements based on floor accessibility and heavy furniture
+ * Helper Crew Requirement Heuristic (Demo / Assumption Layer)
  */
 export function calculateHelpersRequirement(
   items: InventoryItem[],
@@ -199,21 +457,4 @@ export function calculateHelpersRequirement(
     helpersNeeded: 0,
     reason: 'Standard driver assist is sufficient (ground floor or elevator available).'
   };
-}
-
-/**
- * Verifies route validity
- */
-export function validateRoute(pickup: LocationDetail, dropoff: LocationDetail): { isValid: boolean; error?: string } {
-  if (pickup.normalizedLocation && dropoff.normalizedLocation) {
-    const p = pickup.normalizedLocation.toLowerCase().trim();
-    const d = dropoff.normalizedLocation.toLowerCase().trim();
-    if (p === d) {
-      return {
-        isValid: false,
-        error: 'Pickup and dropoff locations cannot be identical.'
-      };
-    }
-  }
-  return { isValid: true };
 }
