@@ -19,6 +19,8 @@ export function parseLocalDelta(userUtterance: string): Partial<StateDelta> {
   // 1. Off-topic
   if (
     lower.includes('weather') ||
+    lower.includes('raining') ||
+    lower.includes('rain') ||
     lower.includes('joke') ||
     lower.includes('who are you') ||
     lower.includes('cricket') ||
@@ -83,16 +85,22 @@ export function parseLocalDelta(userUtterance: string): Partial<StateDelta> {
   }
 
   // 7. Location from -> to
-  const fromToMatch = text.match(/(?:from|pickup(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)\s+(?:to|dropoff(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:tomorrow|today|evening|morning|on|at)|\.|$)/i);
+  const fromToMatch = text.match(/(?:from|pick-?up(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)\s+(?:to|drop-?off(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:tomorrow|today|evening|morning|on|at)|\.|$)/i);
   if (fromToMatch) {
     delta.pickupLocation = normalizeLocation(fromToMatch[1].trim());
     delta.dropoffLocation = normalizeLocation(fromToMatch[2].trim());
   } else {
-    const fromMatch = text.match(/(?:from|pickup(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:to|tomorrow|today|\.|$))/i);
-    if (fromMatch) delta.pickupLocation = normalizeLocation(fromMatch[1].trim());
+    // Check explicit drop-off phrase
+    const toMatch = text.match(/(?:drop-?off(?:\s+is)?|destination(?:\s+is)?|to)\s+(?:also\s+)?([a-zA-Z0-9\s]+?)(?:\s+(?:from|tomorrow|today|\.|$))/i);
+    if (toMatch) {
+      delta.dropoffLocation = normalizeLocation(toMatch[1].trim());
+    }
 
-    const toMatch = text.match(/(?:to|dropoff(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:from|tomorrow|today|\.|$))/i);
-    if (toMatch) delta.dropoffLocation = normalizeLocation(toMatch[1].trim());
+    // Check explicit pickup phrase
+    const fromMatch = text.match(/(?:from|pick-?up(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:to|tomorrow|today|\.|$))/i);
+    if (fromMatch) {
+      delta.pickupLocation = normalizeLocation(fromMatch[1].trim());
+    }
   }
 
   // Standalone Indian localities
@@ -112,7 +120,9 @@ export function parseLocalDelta(userUtterance: string): Partial<StateDelta> {
   ];
   for (const loc of knownLocs) {
     if (lower.includes(loc)) {
-      if (!delta.pickupLocation) {
+      if (lower.includes('drop-off') || lower.includes('dropoff') || lower.includes('destination') || lower.includes('to ')) {
+        delta.dropoffLocation = normalizeLocation(loc);
+      } else if (!delta.pickupLocation) {
         delta.pickupLocation = normalizeLocation(loc);
       } else if (!delta.dropoffLocation && loc !== delta.pickupLocation.toLowerCase()) {
         delta.dropoffLocation = normalizeLocation(loc);
@@ -154,8 +164,20 @@ export function parseLocalDelta(userUtterance: string): Partial<StateDelta> {
     delta.isInventoryAmbiguous = true;
   } else {
     const itemsToAdd: Array<{ name: string; quantity: number }> = [];
-    for (const itemName of Object.keys(KNOWN_ITEM_CATALOG)) {
+    const sortedItemNames = Object.keys(KNOWN_ITEM_CATALOG).sort((a, b) => b.length - a.length);
+    for (const itemName of sortedItemNames) {
       if (lower.includes(itemName)) {
+        // Prevent duplicate matching for box / boxes and bed / double bed
+        if (itemName === 'box' && itemsToAdd.some(i => i.name === 'boxes' || i.name === 'carton box')) {
+          continue;
+        }
+        if (itemName === 'bed' && itemsToAdd.some(i => i.name.includes('bed'))) {
+          continue;
+        }
+        if (itemName === 'sofa' && itemsToAdd.some(i => i.name.includes('sofa'))) {
+          continue;
+        }
+
         const qtyMatch = lower.match(new RegExp(`(\\d+|one|two|three|four|five|six|seven|eight|nine|ten)\\s+${itemName}`, 'i'));
         let qty = 1;
         if (qtyMatch) {

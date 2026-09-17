@@ -8,17 +8,27 @@ import { parseLocalDelta } from '@/lib/ai/localExtractor';
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
+  let body: Partial<ChatApiRequest>;
+  
   try {
-    const body: ChatApiRequest = await req.json();
-    const { sessionId, message, currentState, history = [] } = body;
+    body = await req.json();
+  } catch {
+    return NextResponse.json(
+      { error: 'Invalid JSON in request body' },
+      { status: 400 }
+    );
+  }
 
-    if (!message || typeof message !== 'string' || message.trim().length === 0) {
-      return NextResponse.json(
-        { error: 'Message cannot be empty' },
-        { status: 400 }
-      );
-    }
+  const { sessionId, message, currentState, history = [] } = body;
 
+  if (!message || typeof message !== 'string' || message.trim().length === 0) {
+    return NextResponse.json(
+      { error: 'Message cannot be empty' },
+      { status: 400 }
+    );
+  }
+
+  try {
     const state: BookingState = currentState || createInitialBookingState(sessionId || 'default-session');
 
     // If running in development without external keys, use local deterministic fallback extractor
@@ -67,11 +77,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(responsePayload);
   } catch (error: unknown) {
     const err = error as Error;
-    console.error('Chat API error:', err);
+    console.error('Chat API error:', err.message);
     return NextResponse.json(
       {
         error: 'Failed to process voice turn',
-        details: err?.message || 'Unknown error'
+        message: 'Something went wrong while processing that request. Please try again.'
       },
       { status: 500 }
     );

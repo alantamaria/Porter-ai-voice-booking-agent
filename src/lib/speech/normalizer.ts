@@ -74,7 +74,15 @@ const LOCALITY_PHONETIC_MAP: Record<string, string> = {
   // Sarjapur
   'sarjapur': 'Sarjapur',
   'sarjapura': 'Sarjapur',
-  'sarjapur road': 'Sarjapur Road'
+  'sarjapur road': 'Sarjapur Road',
+
+  // Kochi Hubs (Evaluator Flow)
+  'kakkanad': 'Kakkanad',
+  'kakkad': 'Kakkanad',
+  'vyttila': 'Vyttila',
+  'vytilla': 'Vyttila',
+  'edappally': 'Edappally',
+  'edapally': 'Edappally'
 };
 
 const NUMBER_WORDS: Record<string, number> = {
