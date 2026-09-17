@@ -265,4 +265,11 @@ export class LLMClient {
       data: validation.data
     };
   }
+
+  /**
+   * Generates raw string output directly from underlying provider.
+   */
+  async generateRaw(prompt: string, systemPrompt: string): Promise<string> {
+    return this.provider.generateRaw(prompt, systemPrompt);
+  }
 }

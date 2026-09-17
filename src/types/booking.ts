@@ -186,14 +186,27 @@ export interface StateDelta {
 
   // Top-level aliases for direct access
   pickupLocation?: string;
+  pickup?: string;
   pickupFloor?: number;
   pickupHasElevator?: boolean;
   dropoffLocation?: string;
+  dropoff?: string;
   dropoffFloor?: number;
   dropoffHasElevator?: boolean;
   scheduleDate?: string;
+  date?: string;
   scheduleTime?: string;
+  time?: string;
+  timeText?: string;
+  isTimeAmbiguous?: boolean;
+  isInventoryAmbiguous?: boolean;
   itemsToAdd?: Array<{
+    name: string;
+    quantity: number;
+    category?: CargoCategory;
+    size?: CargoSize;
+  }>;
+  items?: Array<{
     name: string;
     quantity: number;
     category?: CargoCategory;
@@ -322,9 +335,74 @@ export interface ChatApiResponse {
   phase: ConversationPhase;
   shouldSpeak: boolean;
   actionRequired?: 'CONFIRMATION' | 'CLARIFICATION' | 'NONE';
+  action?: ConversationAction;
   diagnostics: {
     extractorDelta: StateDelta;
     processingTimeMs: number;
     modelUsed: string;
   };
 }
+
+/**
+ * STEP 4: Conversation Action Model (Section 3)
+ */
+export type ConversationActionType =
+  | 'GREET'
+  | 'ASK_FOR_MISSING_INFORMATION'
+  | 'ASK_FOR_CLARIFICATION'
+  | 'ACKNOWLEDGE_CORRECTION'
+  | 'HANDLE_OFF_TOPIC'
+  | 'HANDLE_CANCELLATION'
+  | 'HANDLE_RESTART'
+  | 'PRESENT_REQUIREMENTS_REVIEW'
+  | 'REQUEST_CONFIRMATION'
+  | 'CONFIRM_BOOKING'
+  | 'HANDLE_INVALID_INPUT'
+  | 'HANDLE_SYSTEM_ERROR'
+  | 'END_CONVERSATION';
+
+export interface ConversationAction {
+  type: ConversationActionType;
+  payload?: {
+    targetField?: string;
+    missingFields?: string[];
+    uncertainty?: UncertaintyFlag;
+    correction?: StateAuditEntry;
+    validationError?: string;
+    reviewSummary?: string;
+    offTopicSubject?: string;
+    reason?: string;
+  };
+}
+
+/**
+ * STEP 4: Conversation Result (Section 27)
+ */
+export interface ConversationResult {
+  responseText: string;
+  action: ConversationAction;
+  updatedState: BookingState;
+  shouldSpeak: boolean;
+  requiresUserInput: boolean;
+  bookingConfirmed: boolean;
+  error?: {
+    code: string;
+    message: string;
+  };
+  metadata?: {
+    latencyMs?: number;
+    modelUsed?: string;
+  };
+}
+
+/**
+ * STEP 4: Process User Turn Input (Section 26)
+ */
+export interface ProcessTurnInput {
+  userUtterance: string;
+  currentState?: BookingState;
+  conversationHistory?: MessageTurn[];
+  currentDateTime?: string;
+  sessionId?: string;
+}
+

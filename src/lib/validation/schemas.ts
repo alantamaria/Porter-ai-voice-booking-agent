@@ -58,14 +58,27 @@ export const UncertaintySchema = z.object({
 // State Delta Schema: Validates partial updates extracted from a turn
 export const StateDeltaSchema = z.object({
   pickupLocation: z.string().trim().min(1).optional(),
+  pickup: z.string().trim().min(1).optional(),
   pickupFloor: z.number().int().min(-2).max(100).optional(),
   pickupHasElevator: z.boolean().optional(),
   dropoffLocation: z.string().trim().min(1).optional(),
+  dropoff: z.string().trim().min(1).optional(),
   dropoffFloor: z.number().int().min(-2).max(100).optional(),
   dropoffHasElevator: z.boolean().optional(),
   scheduleDate: z.string().optional(),
+  date: z.string().optional(),
   scheduleTime: z.string().optional(),
+  time: z.string().optional(),
+  timeText: z.string().optional(),
+  isTimeAmbiguous: z.boolean().optional(),
+  isInventoryAmbiguous: z.boolean().optional(),
   itemsToAdd: z.array(z.object({
+    name: z.string().trim().min(1),
+    quantity: z.number().int().positive('Item quantity must be > 0').default(1),
+    category: z.enum(['FURNITURE', 'APPLIANCE', 'BOXES', 'FRAGILE', 'HAZARDOUS', 'OTHER']).optional(),
+    size: z.enum(['SMALL', 'MEDIUM', 'LARGE', 'OVERSIZED']).optional()
+  })).optional(),
+  items: z.array(z.object({
     name: z.string().trim().min(1),
     quantity: z.number().int().positive('Item quantity must be > 0').default(1),
     category: z.enum(['FURNITURE', 'APPLIANCE', 'BOXES', 'FRAGILE', 'HAZARDOUS', 'OTHER']).optional(),

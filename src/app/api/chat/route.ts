@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { BookingState, ChatApiRequest, ChatApiResponse } from '@/types/booking';
-import { runExtractor, runSynthesizer } from '@/lib/ai/engine';
-import { createInitialBookingState, reduceBookingState } from '@/lib/state/stateMachine';
+import { processUserTurn } from '@/lib/conversation/conversationManager';
+import { createInitialBookingState } from '@/lib/state/stateMachine';
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
@@ -17,28 +17,35 @@ export async function POST(req: NextRequest) {
     }
 
     const state: BookingState = currentState || createInitialBookingState(sessionId || 'default-session');
-    const turnIndex = (state.metadata.turnCount || 0) + 1;
 
-    // 1. Pass 1: Extractor
-    const { delta, modelUsed: extractorModel } = await runExtractor(message, state, history);
+    // Run Step 4 Conversation Manager Orchestration Pipeline
+    const result = await processUserTurn({
+      userUtterance: message,
+      currentState: state,
+      conversationHistory: history,
+      sessionId: sessionId || 'default-session'
+    });
 
-    // 2. Deterministic State Reducer
-    const updatedState = reduceBookingState(state, delta, message, turnIndex);
-
-    // 3. Pass 2: Conversational Synthesizer
-    const { reply, modelUsed: synthesizerModel } = await runSynthesizer(message, updatedState, delta, history);
-    updatedState.metadata.lastAgentResponse = reply;
+    const isReview =
+      result.action.type === 'PRESENT_REQUIREMENTS_REVIEW' ||
+      result.action.type === 'REQUEST_CONFIRMATION' ||
+      result.updatedState.phase === 'REQUIREMENTS_REVIEW';
 
     const responsePayload: ChatApiResponse = {
-      reply,
-      updatedState,
-      phase: updatedState.phase,
-      shouldSpeak: true,
-      actionRequired: updatedState.phase === 'REQUIREMENTS_REVIEW' ? 'CONFIRMATION' : 'NONE',
+      reply: result.responseText,
+      updatedState: result.updatedState,
+      phase: result.updatedState.phase,
+      shouldSpeak: result.shouldSpeak,
+      actionRequired: isReview
+        ? 'CONFIRMATION'
+        : (result.action.type === 'ASK_FOR_CLARIFICATION' ? 'CLARIFICATION' : 'NONE'),
+      action: result.action,
       diagnostics: {
-        extractorDelta: delta,
+        extractorDelta: {
+          userIntent: result.updatedState.phase === 'BOOKING_CONFIRMED' ? 'CONFIRMATION' : 'PROVIDE_INFORMATION'
+        },
         processingTimeMs: Date.now() - startTime,
-        modelUsed: `${extractorModel} + ${synthesizerModel}`
+        modelUsed: result.metadata?.modelUsed || 'conversation-manager'
       }
     };
 

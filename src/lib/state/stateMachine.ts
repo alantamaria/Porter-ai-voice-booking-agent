@@ -168,17 +168,17 @@ export function applyStateDelta(
 
   // Extract properties either from nested extractedFields or top-level delta
   const fields = delta.extractedFields || {};
-  const pickupLoc = delta.pickupLocation ?? fields.pickupLocation;
+  const pickupLoc = delta.pickupLocation ?? delta.pickup ?? fields.pickupLocation;
   const pickupFlr = delta.pickupFloor ?? fields.pickupFloor;
   const pickupElev = delta.pickupHasElevator ?? fields.pickupHasElevator;
-  const dropoffLoc = delta.dropoffLocation ?? fields.dropoffLocation;
+  const dropoffLoc = delta.dropoffLocation ?? delta.dropoff ?? fields.dropoffLocation;
   const dropoffFlr = delta.dropoffFloor ?? fields.dropoffFloor;
   const dropoffElev = delta.dropoffHasElevator ?? fields.dropoffHasElevator;
-  const schedDate = delta.scheduleDate ?? fields.bookingDate;
-  const schedTime = delta.scheduleTime ?? fields.bookingTime;
-  const itemsToAdd = delta.itemsToAdd ?? fields.items;
+  const schedDate = delta.scheduleDate ?? delta.date ?? fields.bookingDate;
+  const schedTime = delta.scheduleTime ?? delta.time ?? fields.bookingTime;
+  const itemsToAdd = delta.itemsToAdd ?? delta.items ?? fields.items;
   const itemsToRemove = delta.itemsToRemove ?? fields.itemsToRemove;
-  const isVagueCargo = delta.isVagueInventory ?? fields.isVagueInventory;
+  const isVagueCargo = delta.isVagueInventory ?? delta.isInventoryAmbiguous ?? fields.isVagueInventory;
   const contactName = delta.contactName ?? fields.contactName;
   const contactPhone = delta.contactPhone ?? fields.contactPhone;
   const helpers = delta.helpersNeeded ?? fields.helpersRequired;
@@ -512,8 +512,13 @@ export function applyStateDelta(
   const { score } = calculateCompletion(next);
   next.metadata.completionScore = score;
 
-  // 12. Deterministic Phase Transitions (Section 2)
-  if (delta.userIntent === 'CONFIRMING' && (currentState.phase === 'REQUIREMENTS_REVIEW' || complete)) {
+  // 12. Deterministic Phase Transitions (Section 2 & Step 4)
+  if (delta.userIntent === 'CANCELLATION') {
+    next.confirmationStatus = 'CANCELLED';
+  } else if (
+    (delta.userIntent === 'CONFIRMING' || delta.userIntent === 'CONFIRMATION') &&
+    (currentState.phase === 'REQUIREMENTS_REVIEW' || complete)
+  ) {
     next.phase = 'BOOKING_CONFIRMED';
     next.confirmationStatus = 'CONFIRMED';
   } else if (complete) {
@@ -530,6 +535,13 @@ export function applyStateDelta(
   }
 
   return next;
+}
+
+/**
+ * Deterministic State Reset (Step 4, Section 17)
+ */
+export function resetBookingState(sessionId: string = 'session-1'): BookingState {
+  return createInitialBookingState(sessionId);
 }
 
 /**
