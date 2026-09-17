@@ -234,7 +234,63 @@ export interface StateDelta {
   hazardReason?: string;
   isCancellation?: boolean;
   isRestart?: boolean;
-  userIntent?: 'BOOKING_INQUIRY' | 'PROVIDING_INFO' | 'MAKING_CORRECTION' | 'ASKING_QUESTION' | 'CONFIRMING' | 'CANCELLING' | 'RESTARTING' | 'OFF_TOPIC';
+  userIntent?: UserIntent;
+}
+
+/**
+ * Strict User Intent Types (Section 11)
+ */
+export type UserIntent =
+  | 'BOOKING'
+  | 'PROVIDE_INFORMATION'
+  | 'CORRECTION'
+  | 'CLARIFICATION'
+  | 'CONFIRMATION'
+  | 'CANCELLATION'
+  | 'RESTART'
+  | 'OFF_TOPIC'
+  | 'UNKNOWN'
+  // Backward compatibility aliases
+  | 'BOOKING_INQUIRY'
+  | 'PROVIDING_INFO'
+  | 'MAKING_CORRECTION'
+  | 'ASKING_QUESTION'
+  | 'CONFIRMING'
+  | 'CANCELLING'
+  | 'RESTARTING';
+
+/**
+ * Extractor Contract Interfaces (Section 2 & 18)
+ */
+export interface ExtractorInput {
+  userUtterance: string;
+  conversationContext?: MessageTurn[];
+  currentState?: BookingState;
+  currentDateTime?: string;
+  unresolvedUncertainties?: UncertaintyFlag[];
+}
+
+export type ExtractorErrorCode = 
+  | 'API_TIMEOUT' 
+  | 'API_UNAVAILABLE' 
+  | 'MALFORMED_OUTPUT' 
+  | 'SCHEMA_VALIDATION_FAILED' 
+  | 'RATE_LIMITED' 
+  | 'MISSING_API_KEY' 
+  | 'UNKNOWN';
+
+export interface ExtractorResult {
+  success: boolean;
+  delta?: StateDelta;
+  error?: {
+    code: ExtractorErrorCode;
+    message: string;
+    rawOutput?: string;
+  };
+  diagnostics?: {
+    provider: string;
+    latencyMs: number;
+  };
 }
 
 /**

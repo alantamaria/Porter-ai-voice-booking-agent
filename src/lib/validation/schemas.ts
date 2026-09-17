@@ -103,15 +103,23 @@ export const StateDeltaSchema = z.object({
   isCancellation: z.boolean().default(false),
   isRestart: z.boolean().default(false),
   userIntent: z.enum([
+    'BOOKING',
+    'PROVIDE_INFORMATION',
+    'CORRECTION',
+    'CLARIFICATION',
+    'CONFIRMATION',
+    'CANCELLATION',
+    'RESTART',
+    'OFF_TOPIC',
+    'UNKNOWN',
     'BOOKING_INQUIRY',
     'PROVIDING_INFO',
     'MAKING_CORRECTION',
     'ASKING_QUESTION',
     'CONFIRMING',
     'CANCELLING',
-    'RESTARTING',
-    'OFF_TOPIC'
-  ]).default('PROVIDING_INFO')
+    'RESTARTING'
+  ]).default('PROVIDE_INFORMATION')
 });
 
 /**
