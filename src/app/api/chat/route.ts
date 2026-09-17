@@ -3,6 +3,9 @@ import { BookingState, ChatApiRequest, ChatApiResponse } from '@/types/booking';
 import { processUserTurn } from '@/lib/conversation/conversationManager';
 import { createInitialBookingState } from '@/lib/state/stateMachine';
 
+import { LLMClient, MockLLMProvider } from '@/lib/ai/llmClient';
+import { parseLocalDelta } from '@/lib/ai/localExtractor';
+
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
   try {
@@ -18,13 +21,25 @@ export async function POST(req: NextRequest) {
 
     const state: BookingState = currentState || createInitialBookingState(sessionId || 'default-session');
 
+    // If running in development without external keys, use local deterministic fallback extractor
+    let customClient: LLMClient | undefined;
+    if (!process.env.GROQ_API_KEY && !process.env.OPENAI_API_KEY) {
+      customClient = new LLMClient(new MockLLMProvider(() => {
+        const delta = parseLocalDelta(message);
+        return JSON.stringify(delta);
+      }));
+    }
+
     // Run Step 4 Conversation Manager Orchestration Pipeline
-    const result = await processUserTurn({
-      userUtterance: message,
-      currentState: state,
-      conversationHistory: history,
-      sessionId: sessionId || 'default-session'
-    });
+    const result = await processUserTurn(
+      {
+        userUtterance: message,
+        currentState: state,
+        conversationHistory: history,
+        sessionId: sessionId || 'default-session'
+      },
+      customClient
+    );
 
     const isReview =
       result.action.type === 'PRESENT_REQUIREMENTS_REVIEW' ||

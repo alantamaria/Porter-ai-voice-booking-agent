@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { BookingState, MessageTurn, ChatApiResponse } from '@/types/booking';
 import { createInitialBookingState } from '@/lib/state/stateMachine';
-import { ClientVoiceManager } from '@/lib/speech/clientVoice';
+import { VoiceSessionController } from '@/lib/speech/voiceSessionController';
 import { BookingCard } from '@/components/BookingCard';
 import { LiveTranscript } from '@/components/LiveTranscript';
 import { VoiceController } from '@/components/VoiceController';
@@ -25,156 +25,97 @@ export default function Home() {
 
   const isModalOpen = manualModalOpen || bookingState.phase === 'BOOKING_CONFIRMED';
 
-  const voiceManagerRef = useRef<ClientVoiceManager | null>(null);
+  const controllerRef = useRef<VoiceSessionController | null>(null);
 
-  // Initialize client voice manager
+  // Initialize VoiceSessionController with API orchestration
   useEffect(() => {
-    voiceManagerRef.current = new ClientVoiceManager();
+    const controller = new VoiceSessionController({
+      silenceTimeoutMs: 6000,
+      processTurnFn: async (input) => {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: input.sessionId,
+            message: input.userUtterance,
+            currentState: input.currentState,
+            history: input.conversationHistory
+          })
+        });
+
+        if (!res.ok) {
+          throw new Error(`Server returned ${res.status}`);
+        }
+
+        const data: ChatApiResponse = await res.json();
+        return {
+          responseText: data.reply,
+          action: data.action || { type: 'GREET' },
+          updatedState: data.updatedState,
+          shouldSpeak: data.shouldSpeak ?? true,
+          requiresUserInput: data.updatedState.confirmationStatus !== 'CONFIRMED' && data.updatedState.confirmationStatus !== 'CANCELLED',
+          bookingConfirmed: data.updatedState.confirmationStatus === 'CONFIRMED'
+        };
+      }
+    });
+
+    controller.onStateChange((vState) => {
+      setIsListening(vState.status === 'LISTENING');
+      setIsLoading(vState.status === 'PROCESSING');
+      setIsAgentSpeaking(vState.status === 'SPEAKING');
+      setInterimTranscript(vState.interimTranscript);
+      if (vState.errorMessage) {
+        setMicError(vState.errorMessage);
+      }
+    });
+
+    controller.onTurnComplete((res) => {
+      setBookingState(res.updatedState);
+      setHistory(controller.getHistory());
+    });
+
+    controllerRef.current = controller;
+
     return () => {
-      voiceManagerRef.current?.stopListening();
-      voiceManagerRef.current?.stopSpeaking();
+      controller.stopSession();
     };
   }, []);
 
-  // Core turn sender: Dispatches user text to /api/chat
+  // Synchronize mute state with voice controller
+  useEffect(() => {
+    controllerRef.current?.setVoiceEnabled(voiceEnabled);
+  }, [voiceEnabled]);
+
+  // Turn sender (Text fallback or Quick Scenario)
   const handleSendMessage = async (text: string) => {
     if (!text.trim() || isLoading) return;
-
-    // Barge-in: Stop any playing audio immediately
-    voiceManagerRef.current?.stopSpeaking();
-    setIsAgentSpeaking(false);
-    setIsListening(false);
-    setInterimTranscript('');
     setMicError(null);
-
-    const userTurn: MessageTurn = {
-      id: `turn-user-${Date.now()}`,
-      role: 'user',
-      text: text.trim(),
-      timestamp: new Date().toLocaleTimeString()
-    };
-
-    const newHistory = [...history, userTurn];
-    setHistory(newHistory);
-    setIsLoading(true);
-
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: bookingState.sessionId,
-          message: text.trim(),
-          currentState: bookingState,
-          history: newHistory
-        })
-      });
-
-      if (!res.ok) {
-        throw new Error(`Server returned ${res.status}`);
-      }
-
-      const data: ChatApiResponse = await res.json();
-
-      const agentTurn: MessageTurn = {
-        id: `turn-agent-${Date.now()}`,
-        role: 'agent',
-        text: data.reply,
-        timestamp: new Date().toLocaleTimeString(),
-        phase: data.phase,
-        corrections: data.updatedState.metadata.detectedCorrectionsInLastTurn,
-        ambiguities: data.updatedState.metadata.detectedAmbiguitiesInLastTurn
-      };
-
-      setHistory(prev => [...prev, agentTurn]);
-      setBookingState(data.updatedState);
-
-      // Play audio response if voice enabled
-      if (voiceEnabled && data.reply) {
-        setIsAgentSpeaking(true);
-        voiceManagerRef.current?.speak(data.reply, () => {
-          setIsAgentSpeaking(false);
-        });
-      }
-    } catch (err: unknown) {
-      const error = err as Error;
-      console.error('Chat error:', error);
-      const errorTurn: MessageTurn = {
-        id: `turn-error-${Date.now()}`,
-        role: 'agent',
-        text: "I encountered a brief connection issue. Could you please repeat that?",
-        timestamp: new Date().toLocaleTimeString()
-      };
-      setHistory(prev => [...prev, errorTurn]);
-    } finally {
-      setIsLoading(false);
-    }
+    await controllerRef.current?.handleTextFallback(text);
   };
 
   // Mic Toggle Handler
-  const handleToggleMic = () => {
-    const vm = voiceManagerRef.current;
-    if (!vm) return;
+  const handleToggleMic = async () => {
+    const controller = controllerRef.current;
+    if (!controller) return;
 
     if (isListening) {
-      vm.stopListening();
-      setIsListening(false);
-      setInterimTranscript('');
-      return;
-    }
-
-    // Check browser support
-    if (!vm.isSupported()) {
-      setMicError('Speech recognition is not supported in this browser. Please use Google Chrome/Edge or type directly.');
-      return;
-    }
-
-    const started = vm.startListening(
-      (text, isFinal) => {
-        if (isFinal) {
-          setInterimTranscript('');
-          handleSendMessage(text);
-        } else {
-          setInterimTranscript(text);
-        }
-      },
-      // Silence timeout callback
-      () => {
-        setIsListening(false);
-        setInterimTranscript('');
-        handleSendMessage("..."); // triggers agent silence prompt
-      },
-      // Error callback
-      (err) => {
-        setIsListening(false);
-        setInterimTranscript('');
-        if (err === 'not-allowed') {
-          setMicError('Microphone access was denied. Please allow microphone permissions in browser settings.');
-        } else if (err !== 'no-speech') {
-          setMicError(`Voice error: ${err}`);
-        }
-      }
-    );
-
-    if (started) {
-      setIsListening(true);
+      await controller.stopListening();
+    } else {
       setMicError(null);
+      await controller.startListening();
     }
   };
 
-  // Stop Speaking (Barge-in button)
+  // Stop Speaking (Barge-in / interruption)
   const handleStopSpeaking = () => {
-    voiceManagerRef.current?.stopSpeaking();
-    setIsAgentSpeaking(false);
+    controllerRef.current?.interruptSpeech();
   };
 
   // Reset entire conversation
   const handleResetConversation = () => {
-    voiceManagerRef.current?.stopListening();
-    voiceManagerRef.current?.stopSpeaking();
-    setIsListening(false);
-    setIsAgentSpeaking(false);
-    setBookingState(createInitialBookingState(`session-${Date.now()}`));
+    const newSessionId = `session-${Date.now()}`;
+    controllerRef.current?.reset(newSessionId);
+    setBookingState(createInitialBookingState(newSessionId));
     setHistory([]);
     setInterimTranscript('');
     setMicError(null);

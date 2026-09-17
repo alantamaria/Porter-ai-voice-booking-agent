@@ -3,7 +3,7 @@
  * Supports barge-in, voice selection, silence timeout, and fallback.
  */
 
-interface SpeechRecognitionEventLike {
+export interface SpeechRecognitionEventLike {
   resultIndex: number;
   results: {
     length: number;
@@ -14,19 +14,21 @@ interface SpeechRecognitionEventLike {
   };
 }
 
-interface SpeechRecognitionErrorEventLike {
+export interface SpeechRecognitionErrorEventLike {
   error: string;
 }
 
-interface SpeechRecognitionInstance {
+export interface SpeechRecognitionInstance {
   continuous: boolean;
   interimResults: boolean;
   lang: string;
   onresult: ((event: SpeechRecognitionEventLike) => void) | null;
   onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+  onstart?: (() => void) | null;
   onend: (() => void) | null;
   start: () => void;
   stop: () => void;
+  abort?: () => void;
 }
 
 declare global {
