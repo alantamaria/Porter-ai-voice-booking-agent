@@ -150,7 +150,7 @@ Add your API key (e.g. `GROQ_API_KEY` for sub-300ms responses or `OPENAI_API_KEY
 ```bash
 npm run dev
 ```
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Open [http://localhost:3001](http://localhost:3001) in your browser.
 
 ### 5. Run Production Build
 ```bash
