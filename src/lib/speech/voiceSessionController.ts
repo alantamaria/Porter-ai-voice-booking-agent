@@ -341,6 +341,9 @@ export class VoiceSessionController {
       this.silenceTimer = setTimeout(() => {
         this.handleSilenceTimeout();
       }, this.silenceTimeoutMs);
+      if (this.silenceTimer && typeof (this.silenceTimer as unknown as { unref?: () => void }).unref === 'function') {
+        (this.silenceTimer as unknown as { unref: () => void }).unref();
+      }
     }
   }
 

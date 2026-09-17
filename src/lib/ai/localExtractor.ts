@@ -100,6 +100,7 @@ export function parseLocalDelta(userUtterance: string): Partial<StateDelta> {
     'kakkanad',
     'whitefield',
     'vyttila',
+    'edappally',
     'hsr layout',
     'indiranagar',
     'koramangala',
