@@ -32,6 +32,9 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({ state,
         <p className="confirmation-subtitle">
           Your booking details have been confirmed in this assistant.
         </p>
+        <div className="confirmation-disclaimer" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.5rem', background: 'rgba(255,255,255,0.03)', padding: '0.4rem 0.8rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.06)' }}>
+          Confirmed within this assistant (No official Porter booking created &bull; No external driver dispatched)
+        </div>
       </div>
 
       <div className="confirmed-summary-box">

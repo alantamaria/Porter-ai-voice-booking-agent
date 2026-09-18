@@ -306,11 +306,6 @@ export interface ExtractorResult {
   };
 }
 
-/**
- * Type alias for backward compatibility
- */
-export type ExtractorDelta = StateDelta;
-
 export interface MessageTurn {
   id: string;
   role: 'user' | 'agent' | 'system';

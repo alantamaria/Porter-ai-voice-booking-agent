@@ -1,5 +1,5 @@
 import { StateDelta } from '@/types/booking';
-import { normalizeLocation } from '@/lib/speech/normalizer';
+import { normalizeLocation, isUnusableAudio, detectSTTUncertainty } from '@/lib/speech/normalizer';
 import { checkHazardousItem, KNOWN_ITEM_CATALOG } from '@/lib/validation/rules';
 
 /**
@@ -15,6 +15,27 @@ export function parseLocalDelta(userUtterance: string): Partial<StateDelta> {
     isImpossibleOrHazardous: false,
     userIntent: 'PROVIDE_INFORMATION'
   };
+
+  // 0. Inaudible / unusable audio
+  if (isUnusableAudio(text)) {
+    delta.userIntent = 'UNKNOWN';
+    return delta;
+  }
+
+  // 0.1 STT Uncertainty detection (e.g. "somewhere near Kakkanad")
+  const sttUnc = detectSTTUncertainty(text);
+  if (sttUnc?.isUncertain) {
+    delta.ambiguities = [
+      {
+        field: sttUnc.field,
+        suspectedValues: [],
+        userUtterance: text,
+        severity: 'BLOCKING',
+        clarificationPrompt: sttUnc.clarificationPrompt
+      }
+    ];
+    delta.userIntent = 'CLARIFICATION';
+  }
 
   // 1. Off-topic
   if (
@@ -87,7 +108,10 @@ export function parseLocalDelta(userUtterance: string): Partial<StateDelta> {
   // 7. Location from -> to
   const fromToMatch = text.match(/(?:from|pick-?up(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)\s+(?:to|drop-?off(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:tomorrow|today|evening|morning|on|at)|\.|$)/i);
   if (fromToMatch) {
-    delta.pickupLocation = normalizeLocation(fromToMatch[1].trim());
+    const rawPickup = fromToMatch[1].trim();
+    if (!rawPickup.toLowerCase().includes('somewhere near') && !rawPickup.toLowerCase().includes('near about')) {
+      delta.pickupLocation = normalizeLocation(rawPickup);
+    }
     delta.dropoffLocation = normalizeLocation(fromToMatch[2].trim());
   } else {
     // Check explicit drop-off phrase
@@ -99,7 +123,10 @@ export function parseLocalDelta(userUtterance: string): Partial<StateDelta> {
     // Check explicit pickup phrase
     const fromMatch = text.match(/(?:from|pick-?up(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:to|tomorrow|today|\.|$))/i);
     if (fromMatch) {
-      delta.pickupLocation = normalizeLocation(fromMatch[1].trim());
+      const rawPickup = fromMatch[1].trim();
+      if (!rawPickup.toLowerCase().includes('somewhere near') && !rawPickup.toLowerCase().includes('near about')) {
+        delta.pickupLocation = normalizeLocation(rawPickup);
+      }
     }
   }
 
@@ -120,15 +147,18 @@ export function parseLocalDelta(userUtterance: string): Partial<StateDelta> {
   ];
   for (const loc of knownLocs) {
     if (lower.includes(loc)) {
-      if (lower.includes('drop-off') || lower.includes('dropoff') || lower.includes('destination') || lower.includes('to ')) {
+      if (lower.includes('drop-off') || lower.includes('dropoff') || lower.includes('destination') || lower.includes('to ' + loc)) {
         delta.dropoffLocation = normalizeLocation(loc);
-      } else if (!delta.pickupLocation) {
-        delta.pickupLocation = normalizeLocation(loc);
-      } else if (!delta.dropoffLocation && loc !== delta.pickupLocation.toLowerCase()) {
-        delta.dropoffLocation = normalizeLocation(loc);
+      } else if (!lower.includes('somewhere near ' + loc) && !lower.includes('somewhere around ' + loc)) {
+        if (!delta.pickupLocation) {
+          delta.pickupLocation = normalizeLocation(loc);
+        } else if (!delta.dropoffLocation && loc !== delta.pickupLocation.toLowerCase()) {
+          delta.dropoffLocation = normalizeLocation(loc);
+        }
       }
     }
   }
+
 
   // 8. Dates
   if (lower.includes('tomorrow')) {

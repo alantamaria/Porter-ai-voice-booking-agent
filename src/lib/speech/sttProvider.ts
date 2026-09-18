@@ -1,9 +1,9 @@
-import { ISpeechToTextProvider } from '@/types/voice';
 import {
+  ISpeechToTextProvider,
   SpeechRecognitionInstance,
   SpeechRecognitionEventLike,
-  SpeechRecognitionErrorEventLike,
-} from './clientVoice';
+  SpeechRecognitionErrorEventLike
+} from '@/types/voice';
 
 /**
  * Browser Speech Recognition Provider (Section 3)

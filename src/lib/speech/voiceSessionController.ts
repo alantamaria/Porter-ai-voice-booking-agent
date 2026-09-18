@@ -7,7 +7,7 @@ import {
 } from '@/types/voice';
 import { BookingState, ConversationResult, MessageTurn } from '@/types/booking';
 import { processUserTurn } from '@/lib/conversation/conversationManager';
-import { createInitialBookingState, resetBookingState } from '@/lib/state/stateMachine';
+import { createInitialBookingState } from '@/lib/state/stateMachine';
 import { BrowserSTTProvider } from './sttProvider';
 import { BrowserTTSProvider } from './ttsProvider';
 
@@ -360,7 +360,7 @@ export class VoiceSessionController {
   public reset(newSessionId?: string): void {
     this.stopSession();
     this.sessionId = newSessionId || `session-${Date.now()}`;
-    this.bookingState = resetBookingState(this.sessionId);
+    this.bookingState = createInitialBookingState(this.sessionId);
     this.history = [];
     this.isTerminal = false;
     this.lastProcessedTranscript = '';

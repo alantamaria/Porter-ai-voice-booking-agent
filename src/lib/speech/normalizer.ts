@@ -142,47 +142,6 @@ export function normalizeLocation(input: string): string {
 }
 
 /**
- * Parses colloquial relative dates like "tomorrow", "day after tomorrow", "today"
- * relative to the provided base date.
- */
-export function parseRelativeDate(dateStr: string, baseDate: Date = new Date()): { isoDate: string; isPast: boolean } {
-  const lower = dateStr.toLowerCase().trim();
-  const target = new Date(baseDate);
-
-  if (lower.includes('day after tomorrow')) {
-    target.setDate(target.getDate() + 2);
-  } else if (lower.includes('tomorrow')) {
-    target.setDate(target.getDate() + 1);
-  } else if (lower.includes('today') || lower.includes('tonight')) {
-    // today is kept
-  } else if (lower.includes('yesterday') || lower.includes('day before yesterday')) {
-    target.setDate(target.getDate() - 1);
-    const iso = target.toISOString().split('T')[0];
-    return { isoDate: iso, isPast: true };
-  } else {
-    // Attempt standard ISO or natural parse
-    const parsed = new Date(dateStr);
-    if (!isNaN(parsed.getTime())) {
-      const todayZero = new Date(baseDate);
-      todayZero.setHours(0, 0, 0, 0);
-      const isPast = parsed.getTime() < todayZero.getTime();
-      return { isoDate: parsed.toISOString().split('T')[0], isPast };
-    }
-  }
-
-  const iso = target.toISOString().split('T')[0];
-  const todayZero = new Date(baseDate);
-  todayZero.setHours(0, 0, 0, 0);
-  const targetZero = new Date(target);
-  targetZero.setHours(0, 0, 0, 0);
-
-  return {
-    isoDate: iso,
-    isPast: targetZero.getTime() < todayZero.getTime()
-  };
-}
-
-/**
  * Extracts floor number and lift presence from informal voice expressions
  * e.g. "3rd floor no lift", "ground floor", "second floor with elevator"
  */
@@ -230,35 +189,63 @@ export function parseFloorAndLift(text: string): { floor?: number; hasElevator?:
 }
 
 /**
- * Detects whether cargo description is too vague (e.g. "a few things", "some stuff")
+ * Detects whether an audio transcript is inaudible, unintelligible, noise, or filler-only.
  */
-export function isInventoryDescriptionVague(text: string): boolean {
+export function isUnusableAudio(text: string): boolean {
+  if (!text || !text.trim()) return true;
   const lower = text.toLowerCase().trim();
-  const vaguePhrases = [
-    'a few things',
-    'few things',
-    'some things',
-    'some items',
-    'some stuff',
-    'a couple of things',
-    'household items',
-    'luggage',
-    'not much',
-    'just stuff',
-    'normal things',
-    'random things',
-    'little stuff'
-  ];
 
-  // If text is extremely short and matches vague phrases
-  for (const phrase of vaguePhrases) {
-    if (lower === phrase || lower.includes(phrase)) {
-      // If it doesn't mention specific items like "bed", "sofa", "fridge", "boxes"
-      const specificKeywords = ['bed', 'sofa', 'fridge', 'refrigerator', 'tv', 'table', 'chair', 'box', 'boxes', 'almirah', 'wardrobe', 'washing machine', 'bike', 'mattress'];
-      const hasSpecific = specificKeywords.some(k => lower.includes(k));
-      if (!hasSpecific) return true;
-    }
+  // Explicit inaudible / noise markers from STT
+  if (
+    lower.includes('[inaudible]') ||
+    lower.includes('[unintelligible]') ||
+    lower.includes('[noise]') ||
+    lower.includes('[audio]') ||
+    lower.includes('[applause]') ||
+    lower.includes('*mumble*') ||
+    lower.includes('(inaudible)')
+  ) {
+    return true;
+  }
+
+  // Purely punctuation / symbols with no letters or digits
+  if (/^[^\p{L}\p{N}]+$/u.test(lower)) {
+    return true;
+  }
+
+  // Filler noise only with no substance (e.g. "umm", "uhh", "umm uhh", "mhm", "huh")
+  const words = lower.split(/\s+/).filter(Boolean);
+  const fillerWords = new Set(['umm', 'um', 'uhh', 'uh', 'mhm', 'huh', 'ah', 'ahh', 'er']);
+  if (words.length > 0 && words.every(w => fillerWords.has(w))) {
+    return true;
   }
 
   return false;
 }
+
+/**
+ * Detects whether an utterance expresses locality uncertainty (e.g. "somewhere near Kakkanad", "maybe Vyttila", "Kakkanad or Vyttila")
+ */
+export function detectSTTUncertainty(text: string): { isUncertain: boolean; field: string; clarificationPrompt: string } | null {
+  const lower = text.toLowerCase().trim();
+
+  // Locality uncertainty
+  if (
+    lower.includes('somewhere near') ||
+    lower.includes('somewhere around') ||
+    lower.includes('near about') ||
+    lower.includes('not sure if') ||
+    lower.includes('maybe ') ||
+    /\baround\s+[a-z]+/i.test(lower) ||
+    (lower.match(/\b(?:or)\b/i) && (lower.includes('kakkanad') || lower.includes('vyttila') || lower.includes('koramangala')))
+  ) {
+    return {
+      isUncertain: true,
+      field: 'location',
+      clarificationPrompt: 'Could you please confirm the exact location or landmark?'
+    };
+  }
+
+  return null;
+}
+

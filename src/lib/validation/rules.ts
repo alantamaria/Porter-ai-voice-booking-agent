@@ -304,12 +304,26 @@ export function isBookingComplete(state: BookingState): boolean {
     return false;
   }
 
-  // 4. Date must not be in the past
+  // 4. Route serviceability check
+  const serviceability = validateRouteServiceability(
+    state.pickup.normalizedLocation,
+    state.dropoff.normalizedLocation
+  );
+  if (!serviceability.isServiceable) {
+    return false;
+  }
+
+  // 5. Fleet capacity check: cannot confirm if vehicle is UNSERVICEABLE_OVERLOAD
+  if (state.logistics.recommendedVehicle === 'UNSERVICEABLE_OVERLOAD') {
+    return false;
+  }
+
+  // 6. Date must not be in the past
   if (state.schedule.isPastDate || !state.schedule.isValid) {
     return false;
   }
 
-  // 5. Inventory must not be vague
+  // 7. Inventory must not be vague
   if (state.inventory.isVague || state.inventory.items.length === 0) {
     return false;
   }
@@ -323,22 +337,82 @@ export function isBookingComplete(state: BookingState): boolean {
 export function checkHazardousItem(itemName: string): { isHazardous: boolean; reason?: string } {
   const lower = itemName.toLowerCase();
   for (const keyword of PROHIBITED_KEYWORDS) {
-    if (lower.includes(keyword)) {
+    const stem = keyword.endsWith('s') && !keyword.endsWith('ss') ? keyword.slice(0, -1) : keyword;
+    const wordRegex = new RegExp(`\\b${stem.replace(/\\s+/g, '\\s+')}s?\\b`, 'i');
+    if (wordRegex.test(lower)) {
       return {
         isHazardous: true,
         reason: `Item contains prohibited goods (${keyword}). Porter cannot transport hazardous, living, or restricted items.`
       };
     }
   }
+
   return { isHazardous: false };
 }
 
 /**
- * Route Validation (Alias for same location and serviceability)
+ * Route Serviceability Validation
+ * Validates that routes remain within supported intra-city operational hubs.
  */
-export function validateRoute(pickup: LocationDetail, dropoff: LocationDetail): { isValid: boolean; error?: string } {
-  return validateSameLocation(pickup.normalizedLocation, dropoff.normalizedLocation);
+const UNSERVICEABLE_KEYWORDS = [
+  'london', 'new york', 'dubai', 'singapore', 'paris', 'tokyo', 'usa', 'uk',
+  'delhi', 'mumbai', 'kolkata', 'hyderabad', 'chennai', 'pune',
+  'out of country', 'international', 'unserviceable', 'remote village', 'himalayas'
+];
+
+/**
+ * Route Serviceability Validation
+ * Validates that routes remain within supported logistics service zones.
+ */
+export function validateRouteServiceability(
+  pickup?: string,
+  dropoff?: string
+): { isServiceable: boolean; error?: string } {
+  if (pickup) {
+    const lowerP = pickup.toLowerCase();
+    for (const kw of UNSERVICEABLE_KEYWORDS) {
+      if (lowerP.includes(kw)) {
+        return {
+          isServiceable: false,
+          error: `Pickup location ("${pickup}") is outside our supported service area. Porter cannot service international or out-of-scope routes.`
+        };
+      }
+    }
+  }
+
+  if (dropoff) {
+    const lowerD = dropoff.toLowerCase();
+    for (const kw of UNSERVICEABLE_KEYWORDS) {
+      if (lowerD.includes(kw)) {
+        return {
+          isServiceable: false,
+          error: `Drop-off destination ("${dropoff}") is outside our supported service area. Porter cannot service international or out-of-scope routes.`
+        };
+      }
+    }
+  }
+
+  // Cross-city / inter-hub check (e.g. Bengaluru to Kochi)
+  if (pickup && dropoff) {
+    const lowerP = pickup.toLowerCase();
+    const lowerD = dropoff.toLowerCase();
+    const isBlrP = lowerP.includes('bengaluru') || lowerP.includes('bangalore');
+    const isBlrD = lowerD.includes('bengaluru') || lowerD.includes('bangalore');
+    const isKochiP = lowerP.includes('kochi') || lowerP.includes('cochin');
+    const isKochiD = lowerD.includes('kochi') || lowerD.includes('cochin');
+
+    if ((isBlrP && isKochiD) || (isKochiP && isBlrD)) {
+      return {
+        isServiceable: false,
+        error: `Routes between Bengaluru and Kochi are inter-city and outside our intra-city service area. Porter currently only operates intra-city moves within each hub.`
+      };
+    }
+  }
+
+  return { isServiceable: true };
 }
+
+
 
 /**
  * SECTION 10: Vehicle Recommendation Heuristic (Demo / Assumption Layer)

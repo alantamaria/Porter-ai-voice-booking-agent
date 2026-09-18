@@ -8,9 +8,10 @@ import {
 } from '@/types/booking';
 import { StateDeltaSchema } from '@/lib/validation/schemas';
 import { getMissingMandatoryFields, isBookingComplete } from '@/lib/validation/rules';
-import { applyStateDelta, createInitialBookingState, resetBookingState } from '@/lib/state/stateMachine';
+import { applyStateDelta, createInitialBookingState } from '@/lib/state/stateMachine';
 import { extractStateDelta } from '@/lib/ai/extractor';
 import { LLMClient } from '@/lib/ai/llmClient';
+import { isUnusableAudio } from '@/lib/speech/normalizer';
 import { RESPONSE_SYSTEM_PROMPT } from './responsePrompt';
 
 /**
@@ -122,14 +123,20 @@ export function determineNextAction(
   // Check state systemWarnings added this turn
   if (state.metadata.systemWarnings && state.metadata.systemWarnings.length > 0) {
     const latestWarning = state.metadata.systemWarnings[state.metadata.systemWarnings.length - 1];
-    // If it's a date or cargo warning, block immediately with guidance
+    // If it's a date, route serviceability, overload, or cargo warning, block immediately with guidance
     if (
       latestWarning.toLowerCase().includes('past') ||
       latestWarning.toLowerCase().includes('hazard') ||
       latestWarning.toLowerCase().includes('same') ||
       latestWarning.toLowerCase().includes('identical') ||
       latestWarning.toLowerCase().includes('phone') ||
-      latestWarning.toLowerCase().includes('invalid')
+      latestWarning.toLowerCase().includes('invalid') ||
+      latestWarning.toLowerCase().includes('service') ||
+      latestWarning.toLowerCase().includes('outside') ||
+      latestWarning.toLowerCase().includes('hub') ||
+      latestWarning.toLowerCase().includes('capacity') ||
+      latestWarning.toLowerCase().includes('overload') ||
+      latestWarning.toLowerCase().includes('exceed')
     ) {
       return {
         type: 'HANDLE_INVALID_INPUT',
@@ -137,6 +144,17 @@ export function determineNextAction(
       };
     }
   }
+
+  // Check fleet capacity overload directly
+  if (state.logistics.recommendedVehicle === 'UNSERVICEABLE_OVERLOAD') {
+    return {
+      type: 'HANDLE_INVALID_INPUT',
+      payload: {
+        validationError: 'Requested cargo exceeds our standard fleet capacity (over 2.5 tons or 600 cu. ft.). Please reduce items or request a commercial multi-truck booking.'
+      }
+    };
+  }
+
 
   // 3. Blocking ambiguity / uncertainty
   if (latestDelta?.isInventoryAmbiguous || state.inventory.isVague) {
@@ -329,6 +347,12 @@ export function generateDeterministicFallbackResponse(
         const timeRef = delta?.timeText ? ` around ${delta.timeText}` : ' tomorrow evening';
         return `What specific time${timeRef} works best for you?`;
       }
+      if (target === 'location' || action.payload?.uncertainty?.field === 'location') {
+        return "Could you please clarify your exact pickup or drop-off location and landmark?";
+      }
+      if (target === 'audio') {
+        return "Sorry, I couldn't quite make that out. Could you say that again?";
+      }
       return `Could you clarify the ${target || 'details'} for your move?`;
     }
 
@@ -384,11 +408,18 @@ export function generateDeterministicFallbackResponse(
       if (err.toLowerCase().includes('hazard') || err.toLowerCase().includes('prohibited')) {
         return "Safety regulations prohibit transporting hazardous or illegal materials. Please remove those items to proceed.";
       }
+      if (err.toLowerCase().includes('service') || err.toLowerCase().includes('outside') || err.toLowerCase().includes('hub')) {
+        return "We currently only support intra-city moves within our service hubs (Bengaluru and Kochi). Moves outside these areas cannot be serviced.";
+      }
+      if (err.toLowerCase().includes('capacity') || err.toLowerCase().includes('overload') || err.toLowerCase().includes('exceed')) {
+        return "Your cargo exceeds our standard fleet capacity (over 2.5 tons or 600 cu. ft.). Please reduce the items or request a commercial multi-truck booking.";
+      }
       if (err.toLowerCase().includes('phone')) {
         return "Please provide a valid 10-digit Indian mobile number (starting with 6, 7, 8, or 9).";
       }
       return err || "That detail seems invalid. Could you please check and try again?";
     }
+
 
     case 'HANDLE_SYSTEM_ERROR':
       return "I'm sorry, I had trouble processing that. Could you repeat the last detail?";
@@ -470,16 +501,17 @@ export async function processUserTurn(
   const currentState = input.currentState || createInitialBookingState(sessionId);
   const utterance = (input.userUtterance || '').trim();
 
-  // 1. Handle empty / silence turn
-  if (!utterance) {
+  // 1. Handle inaudible / unusable audio or empty turn
+  if (!utterance || isUnusableAudio(utterance)) {
     const emptyAction: ConversationAction = {
-      type: 'ASK_FOR_MISSING_INFORMATION',
+      type: 'ASK_FOR_CLARIFICATION',
       payload: {
-        missingFields: currentState.metadata.missingMandatoryFields
+        targetField: 'audio',
+        reason: 'Unusable or inaudible audio transcript'
       }
     };
     return {
-      responseText: "I didn't catch that. Could you please share your move details?",
+      responseText: "Sorry, I couldn't quite make that out. Could you say that again?",
       action: emptyAction,
       updatedState: currentState,
       shouldSpeak: true,
@@ -487,10 +519,11 @@ export async function processUserTurn(
       bookingConfirmed: false,
       metadata: {
         latencyMs: Date.now() - startTime,
-        modelUsed: client.getProviderName()
+        modelUsed: 'deterministic'
       }
     };
   }
+
 
   // 2. Fast-path restart check before extraction
   const lowerUtterance = utterance.toLowerCase();
@@ -500,7 +533,7 @@ export async function processUserTurn(
     lowerUtterance === 'new booking' ||
     lowerUtterance === 'forget this and make a new booking'
   ) {
-    const resetState = resetBookingState(sessionId);
+    const resetState = createInitialBookingState(sessionId);
     const restartAction: ConversationAction = {
       type: 'HANDLE_RESTART',
       payload: { reason: 'User requested to start over' }
@@ -592,7 +625,7 @@ export async function processUserTurn(
 
   // 6. Handle restart intent from delta
   if (validDelta.userIntent === 'RESTART') {
-    const resetState = resetBookingState(sessionId);
+    const resetState = createInitialBookingState(sessionId);
     const restartAction: ConversationAction = {
       type: 'HANDLE_RESTART',
       payload: { reason: 'User requested to restart booking' }

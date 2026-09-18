@@ -276,4 +276,106 @@ describe('STEP 2: Deterministic Booking State & Validation Test Suite', () => {
     assert.equal(state.phase, 'REQUIREMENTS_REVIEW');
     assert.equal(getMissingMandatoryFields(state).length, 0);
   });
+
+  // Test 16: Zero score on initial state
+  it('16. Initial empty booking state has zero score and GREETING phase', () => {
+    const state = createInitialBookingState('test-session-16');
+    assert.equal(state.phase, 'GREETING');
+    assert.equal(state.metadata.turnCount, 0);
+    assert.equal(state.metadata.completionScore, 0);
+    assert.ok(state.metadata.missingMandatoryFields.length > 0);
+  });
+
+  // Test 17: Multi-turn absorption to 100% completion
+  it('17. Absorbs entities across turns and reaches 100% completion score', () => {
+    let state = createInitialBookingState('test-session-17');
+
+    state = applyStateDelta(state, {
+      pickupLocation: 'Koramangala 4th Block',
+      dropoffLocation: 'Whitefield',
+      userIntent: 'PROVIDE_INFORMATION'
+    }, { userUtterance: 'From Koramangala to Whitefield', turnIndex: 1 });
+    assert.equal(state.pickup.normalizedLocation, 'Koramangala 4th Block');
+    assert.equal(state.dropoff.normalizedLocation, 'Whitefield');
+    assert.ok(state.metadata.completionScore > 0);
+
+    state = applyStateDelta(state, {
+      scheduleDate: 'tomorrow',
+      scheduleTime: 'Evening (5:00 PM - 8:00 PM)',
+      itemsToAdd: [
+        { name: 'double bed', quantity: 1 },
+        { name: 'carton box', quantity: 3 }
+      ],
+      userIntent: 'PROVIDE_INFORMATION'
+    }, { userUtterance: 'Tomorrow evening with 1 double bed and 3 boxes', turnIndex: 2 });
+    assert.equal(state.inventory.items.length, 2);
+    assert.equal(state.logistics.recommendedVehicle, 'TATA_ACE');
+
+    state = applyStateDelta(state, {
+      pickupFloor: 2,
+      pickupHasElevator: true,
+      dropoffFloor: 1,
+      dropoffHasElevator: true,
+      userIntent: 'PROVIDE_INFORMATION'
+    }, { userUtterance: 'Both locations have elevators on 2nd and 1st floor', turnIndex: 3 });
+    assert.equal(state.metadata.completionScore, 100);
+    assert.equal(state.phase, 'REQUIREMENTS_REVIEW');
+  });
+
+  // Test 18: Contradiction and revision history
+  it('18. Contradiction logs audit entry and enters HANDLING_CORRECTION phase', () => {
+    let state = createInitialBookingState('test-session-18');
+
+    state = applyStateDelta(state, {
+      pickupLocation: 'Koramangala',
+      userIntent: 'PROVIDE_INFORMATION'
+    }, { userUtterance: 'Pickup is Koramangala', turnIndex: 1 });
+    assert.equal(state.pickup.normalizedLocation, 'Koramangala');
+
+    state = applyStateDelta(state, {
+      pickupLocation: 'Indiranagar 100ft road',
+      userCorrectionDetected: {
+        field: 'pickupLocation',
+        oldValueDetected: 'Koramangala',
+        newValueDetected: 'Indiranagar 100ft road'
+      },
+      userIntent: 'CORRECTION'
+    }, { userUtterance: 'Wait, not Koramangala, change pickup to Indiranagar 100ft road', turnIndex: 2 });
+
+    assert.equal(state.pickup.normalizedLocation, 'Indiranagar 100ft road');
+    assert.equal(state.phase, 'HANDLING_CORRECTION');
+    assert.ok(state.metadata.revisionHistory.length >= 1);
+    assert.equal(state.metadata.revisionHistory[0].reason, 'USER_CORRECTION');
+  });
+
+  // Test 19: Vague inventory enters RESOLVING_AMBIGUITY
+  it('19. Vague inventory description enters RESOLVING_AMBIGUITY phase', () => {
+    let state = createInitialBookingState('test-session-19');
+
+    state = applyStateDelta(state, {
+      pickupLocation: 'Koramangala',
+      dropoffLocation: 'Whitefield',
+      scheduleDate: 'tomorrow',
+      isInventoryAmbiguous: true,
+      userIntent: 'PROVIDE_INFORMATION'
+    }, { userUtterance: 'I need to move a few things from Koramangala to Whitefield tomorrow', turnIndex: 1 });
+
+    assert.equal(state.inventory.isVague, true);
+    assert.equal(state.phase, 'RESOLVING_AMBIGUITY');
+  });
+
+  // Test 20: Confirmation in review phase transitions to BOOKING_CONFIRMED
+  it('20. User confirmation in review phase transitions to BOOKING_CONFIRMED', () => {
+    let state = createInitialBookingState('test-session-20');
+    state.phase = 'REQUIREMENTS_REVIEW';
+    state.metadata.completionScore = 100;
+
+    state = applyStateDelta(state, {
+      userIntent: 'CONFIRMATION'
+    }, { userUtterance: 'Yes, everything looks good. Please confirm.', turnIndex: 5 });
+
+    assert.equal(state.phase, 'BOOKING_CONFIRMED');
+    assert.equal(state.confirmationStatus, 'CONFIRMED');
+  });
 });
+

@@ -13,7 +13,8 @@ import {
   isInventoryVague,
   KNOWN_ITEM_CATALOG,
   validateBookingDate,
-  validateSameLocation
+  validateSameLocation,
+  validateRouteServiceability
 } from '@/lib/validation/rules';
 import {
   normalizeLocation,
@@ -318,6 +319,17 @@ export function applyStateDelta(
     next.metadata.systemWarnings.push(sameLocCheck.error);
   }
 
+  // Route Serviceability Check
+  const routeCheck = validateRouteServiceability(
+    next.pickup.normalizedLocation,
+    next.dropoff.normalizedLocation
+  );
+  if (!routeCheck.isServiceable && routeCheck.error) {
+    next.metadata.systemWarnings.push(routeCheck.error);
+    if (next.pickup.normalizedLocation) next.pickup.isServiceable = false;
+    if (next.dropoff.normalizedLocation) next.dropoff.isServiceable = false;
+  }
+
   // 6. Booking Schedule & Past-Date Guardrail (Section 6.A)
   if (schedDate) {
     next.schedule.rawText = schedDate;
@@ -500,6 +512,12 @@ export function applyStateDelta(
   next.logistics.vehicleDisplayName = sizing.displayName;
   next.logistics.estimatedBasePriceInr = sizing.baseFareInr;
 
+  if (sizing.vehicle === 'UNSERVICEABLE_OVERLOAD') {
+    next.metadata.systemWarnings.push(
+      'Requested cargo exceeds our standard fleet capacity (over 2.5 tons or 600 cu. ft.). Please reduce items or request a commercial multi-truck booking.'
+    );
+  }
+
   if (helpers === undefined) {
     const helperCalc = calculateHelpersRequirement(next.inventory.items, next.pickup, next.dropoff);
     next.logistics.helpersRequired = helperCalc.helpersNeeded;
@@ -535,23 +553,4 @@ export function applyStateDelta(
   }
 
   return next;
-}
-
-/**
- * Deterministic State Reset (Step 4, Section 17)
- */
-export function resetBookingState(sessionId: string = 'session-1'): BookingState {
-  return createInitialBookingState(sessionId);
-}
-
-/**
- * Backward compatibility alias: `reduceBookingState` calls `applyStateDelta`
- */
-export function reduceBookingState(
-  prevState: BookingState,
-  delta: StateDelta,
-  userUtterance: string,
-  turnIndex: number
-): BookingState {
-  return applyStateDelta(prevState, delta, { userUtterance, turnIndex });
 }

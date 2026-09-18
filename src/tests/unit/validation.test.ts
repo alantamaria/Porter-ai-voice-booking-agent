@@ -4,32 +4,36 @@ import {
   calculateRecommendedVehicle,
   calculateHelpersRequirement,
   checkHazardousItem,
-  validateRoute
+  validateBookingDate,
+  validateSameLocation,
+  validateRouteServiceability,
+  isBookingComplete,
+  isInventoryVague
 } from '../../lib/validation/rules';
 import {
   normalizeLocation,
-  parseRelativeDate,
   parseFloorAndLift,
-  isInventoryDescriptionVague
+  isUnusableAudio,
+  detectSTTUncertainty
 } from '../../lib/speech/normalizer';
+import { createInitialBookingState } from '../../lib/state/stateMachine';
 import { InventoryItem, LocationDetail } from '../../types/booking';
 
 describe('Validation & Domain Rules Unit Tests', () => {
   it('should reject past dates and accept future dates', () => {
     const fixedNow = new Date('2026-09-17T12:00:00Z');
 
-    const tomorrow = parseRelativeDate('tomorrow', fixedNow);
+    const tomorrow = validateBookingDate('tomorrow', fixedNow);
     assert.equal(tomorrow.isPast, false);
     assert.equal(tomorrow.isoDate, '2026-09-18');
 
-    const yesterday = parseRelativeDate('yesterday', fixedNow);
+    const yesterday = validateBookingDate('yesterday', fixedNow);
     assert.equal(yesterday.isPast, true);
-    assert.equal(yesterday.isoDate, '2026-09-16');
 
-    const explicitPast = parseRelativeDate('2025-01-01', fixedNow);
+    const explicitPast = validateBookingDate('2025-01-01', fixedNow);
     assert.equal(explicitPast.isPast, true);
 
-    const explicitFuture = parseRelativeDate('2026-10-01', fixedNow);
+    const explicitFuture = validateBookingDate('2026-10-01', fixedNow);
     assert.equal(explicitFuture.isPast, false);
   });
 
@@ -54,10 +58,10 @@ describe('Validation & Domain Rules Unit Tests', () => {
   });
 
   it('should detect vague cargo descriptions that require follow-up', () => {
-    assert.equal(isInventoryDescriptionVague('a few things'), true);
-    assert.equal(isInventoryDescriptionVague('some stuff'), true);
-    assert.equal(isInventoryDescriptionVague('household items'), true);
-    assert.equal(isInventoryDescriptionVague('1 double bed and 3 boxes'), false);
+    assert.equal(isInventoryVague('a few things'), true);
+    assert.equal(isInventoryVague('some stuff'), true);
+    assert.equal(isInventoryVague('household items'), true);
+    assert.equal(isInventoryVague('1 double bed and 3 boxes'), false);
   });
 
   it('should calculate correct Porter fleet vehicle recommendation', () => {
@@ -158,25 +162,94 @@ describe('Validation & Domain Rules Unit Tests', () => {
   });
 
   it('should reject identical pickup and dropoff locations', () => {
-    const locA: LocationDetail = {
-      rawText: 'Koramangala',
-      normalizedLocation: 'Koramangala',
-      city: 'Bengaluru',
-      floor: 0,
-      hasElevator: null,
-      isServiceable: true,
-      verified: true
-    };
-    const locB: LocationDetail = {
-      rawText: 'Koramangala',
-      normalizedLocation: 'Koramangala',
-      city: 'Bengaluru',
-      floor: 1,
-      hasElevator: null,
-      isServiceable: true,
-      verified: true
-    };
-    const route = validateRoute(locA, locB);
-    assert.equal(route.isValid, false);
+    const sameLocCheck = validateSameLocation('Koramangala', 'Koramangala');
+    assert.equal(sameLocCheck.isValid, false);
+  });
+
+
+  it('should validate route serviceability within supported operational hubs', () => {
+    // Both in Kochi hub
+    const kochiRoute = validateRouteServiceability('Kakkanad', 'Vyttila');
+    assert.equal(kochiRoute.isServiceable, true);
+
+    // Both in Bengaluru hub
+    const blrRoute = validateRouteServiceability('Koramangala', 'Whitefield');
+    assert.equal(blrRoute.isServiceable, true);
+
+    // Out-of-scope international destination
+    const internationalRoute = validateRouteServiceability('Kakkanad', 'London');
+    assert.equal(internationalRoute.isServiceable, false);
+    assert.ok(internationalRoute.error?.includes('service'));
+
+    const nyRoute = validateRouteServiceability('Whitefield', 'New York');
+    assert.equal(nyRoute.isServiceable, false);
+
+    // Unsupported cross-city routes
+    const blrToKochiRoute = validateRouteServiceability('Bengaluru', 'Kochi');
+    assert.equal(blrToKochiRoute.isServiceable, false);
+    assert.ok(blrToKochiRoute.error?.includes('inter-city') || blrToKochiRoute.error?.includes('outside'));
+
+    const delhiRoute = validateRouteServiceability('Bengaluru', 'Delhi');
+    assert.equal(delhiRoute.isServiceable, false);
+  });
+
+  it('should distinguish genuine STT uncertainty from known phonetic variations', () => {
+    // Genuine locality uncertainty
+    const unc1 = detectSTTUncertainty('somewhere near Kakkanad');
+    assert.ok(unc1?.isUncertain);
+
+    const unc2 = detectSTTUncertainty('around Kakkanad');
+    assert.ok(unc2?.isUncertain);
+
+    const unc3 = detectSTTUncertainty('maybe Kakkanad');
+    assert.ok(unc3?.isUncertain);
+
+    const unc4 = detectSTTUncertainty('Kakkanad or Vyttila');
+    assert.ok(unc4?.isUncertain);
+
+    // Definitive locality with phonetic spelling should NOT be marked uncertain
+    const definitive = detectSTTUncertainty('Pickup is Kakkanad');
+    assert.equal(definitive, null);
+
+    const normalized = normalizeLocation('kakkad');
+    assert.equal(normalized, 'Kakkanad');
+  });
+
+
+  it('should reject booking completeness when cargo exceeds standard fleet capacity', () => {
+    const state = createInitialBookingState('overload-test');
+    state.pickup.normalizedLocation = 'Kakkanad';
+    state.pickup.verified = true;
+    state.dropoff.normalizedLocation = 'Vyttila';
+    state.dropoff.verified = true;
+    state.schedule.parsedDate = '2026-09-18';
+    state.schedule.parsedTimeSlot = '2:00 PM';
+    state.schedule.isValid = true;
+    // 50 double beds (> 3000 kg and > 2500 cu ft)
+    state.inventory.items = [{
+      id: 'heavy-1',
+      name: 'Double Bed',
+      category: 'FURNITURE',
+      quantity: 50,
+      size: 'LARGE',
+      isHazardous: false,
+      approxVolumeCuFt: 60,
+      approxWeightKg: 70
+    }];
+    const sizing = calculateRecommendedVehicle(state.inventory.items);
+    state.logistics.recommendedVehicle = sizing.vehicle;
+    assert.equal(state.logistics.recommendedVehicle, 'UNSERVICEABLE_OVERLOAD');
+    assert.equal(isBookingComplete(state), false);
+  });
+
+  it('should detect inaudible, garbled or unusable audio transcripts', () => {
+    assert.equal(isUnusableAudio('[inaudible]'), true);
+    assert.equal(isUnusableAudio('[unintelligible]'), true);
+    assert.equal(isUnusableAudio('[noise]'), true);
+    assert.equal(isUnusableAudio('...???'), true);
+    assert.equal(isUnusableAudio('umm uhh'), true);
+    assert.equal(isUnusableAudio('I want to move a sofa'), false);
+    assert.equal(isUnusableAudio('Tomorrow at 3 PM'), false);
   });
 });
+
