@@ -20,8 +20,7 @@ The **Porter AI Voice Booking Agent** transforms natural, unstructured human voi
 
 Real-world voice interactions are non-linear: users provide details out of order, interrupt the assistant, make corrections mid-sentence, speak in colloquial phonetic abbreviations, and change their minds. Traditional rigid questionnaires or pure LLM text-in/text-out pipelines fail because they either enforce an unnatural interview script or hallucinate prices, dates, and order numbers.
 
-This application solves that by decoupling **Natural Language Understanding (NLU)** from **State Management**:
-$$\textbf{VOICE INPUT} \longrightarrow \textbf{LLM EXTRACTOR} \longrightarrow \textbf{ZOD VALIDATION} \longrightarrow \textbf{DETERMINISTIC REDUCER} \longrightarrow \textbf{REVIEW \& CONFIRM}$$
+> **VOICE INPUT** ➔ **LLM EXTRACTOR** ➔ **ZOD VALIDATION** ➔ **DETERMINISTIC REDUCER** ➔ **REVIEW & CONFIRM**
 
 - **Zero-Hallucination Core**: The LLM *never* mutates the booking state directly. It acts strictly as a structured extractor returning a delta. All state transitions, validation checks, route feasibility, and vehicle allocations are executed by a deterministic code reducer.
 - **Honest UI & Real Data Only**: The interface never fabricates fake booking IDs (`#PTR-9021`), fake prices, or fictitious driver ETAs. Every badge, review summary, and completion metric represents authentic collected state.
@@ -116,19 +115,19 @@ $$\textbf{VOICE INPUT} \longrightarrow \textbf{LLM EXTRACTOR} \longrightarrow \t
 - **Silence Re-Engagement**: A 6-second silence timer speaks a polite listening prompt (*"I'm listening, take your time..."*) without polluting the conversation with empty turns.
 
 ### 🧠 2. Zero-Hallucination Deterministic State Engine
-- **Non-Linear Slot Filling**: The user can provide details in any sequence (e.g., date $\to$ items $\to$ dropoff $\to$ pickup) or all at once in a compound sentence (*"I need to move a sofa from Kakkanad to Kochi tomorrow at 2:00 PM"*).
+- **Non-Linear Slot Filling**: The user can provide details in any sequence (e.g., date → items → dropoff → pickup) or all at once in a compound sentence (*"I need to move a sofa from Kakkanad to Kochi tomorrow at 2:00 PM"*).
 - **Explicit Corrections**: Saying *"Actually, pickup is Edappally"* or *"Change it to Whitefield"* records an audit entry (`StateAuditEntry`), acknowledges the modification, and recalculates the missing fields.
 - **Ambiguity Clarification**: Vague cargo descriptions (*"a few things"*, *"some stuff"*) or broad time windows (*"evening"*) block confirmation and prompt the user for specific items or exact time slots.
 
 ### 📍 3. Indian Logistics & Phonetic Normalization
 - Solves STT phonetic errors for regional logistics hubs (Bengaluru and Kochi):
-  - *Core Mangala / Kormangala* $\to$ **Koramangala**
-  - *HSR Sect 1* $\to$ **HSR Layout Sector 1**
-  - *White feild / Waitfield* $\to$ **Whitefield**
-  - *Kakkana / Kakkad* $\to$ **Kakkanad**
-  - *Cochin* $\to$ **Kochi**
-  - *Vytilla* $\to$ **Vyttila**
-  - *Edapally* $\to$ **Edappally**
+  - *Core Mangala / Kormangala* → **Koramangala**
+  - *HSR Sect 1* → **HSR Layout Sector 1**
+  - *White feild / Waitfield* → **Whitefield**
+  - *Kakkana / Kakkad* → **Kakkanad**
+  - *Cochin* → **Kochi**
+  - *Vytilla* → **Vyttila**
+  - *Edapally* → **Edappally**
 - **STT Uncertainty Detection**: Flags qualifying uncertainty phrases (*"somewhere near Kakkanad"*) as explicit blocking ambiguities requiring clarification.
 
 ### 🛡️ 4. Concrete Logistics Guardrails
@@ -291,10 +290,10 @@ The agent is validated end-to-end against the 13 evaluator scenarios:
 | **User review and confirmation** | Interactive confirmation gate + lock release on user revision | `src/lib/conversation/conversationManager.ts` | **COMPLETE** |
 | **Phonetic STT recovery** | Locality phonetic dictionary maps misheard Indian places to canonical names | `src/lib/speech/normalizer.ts:normalizeLocation` | **COMPLETE** |
 | **STT uncertainty handling** | Detects qualifiers (*"somewhere near"*) as blocking ambiguities | `src/lib/speech/normalizer.ts:detectSTTUncertainty` | **COMPLETE** |
-| **Past date guardrail** | Calendar date validation strictly requires booking date $\ge$ today | `src/lib/validation/rules.ts:validateBookingDate` | **COMPLETE** |
+| **Past date guardrail** | Calendar date validation strictly requires booking date ≥ today | `src/lib/validation/rules.ts:validateBookingDate` | **COMPLETE** |
 | **Identical address blocker** | Blocks identical pickup and drop-off destinations with clear explanation | `src/lib/validation/rules.ts:validateSameLocation` | **COMPLETE** |
 | **Route serviceability checks** | Rejects cross-city & out-of-scope destinations outside operating hubs | `src/lib/validation/rules.ts:validateRouteServiceability` | **COMPLETE** |
-| **Fleet overload protection** | Flags cargo $> 2500$ kg or $> 600$ cu ft as `UNSERVICEABLE_OVERLOAD` | `src/lib/validation/rules.ts:calculateRecommendedVehicle` | **COMPLETE** |
+| **Fleet overload protection** | Flags cargo > 2500 kg or > 600 cu ft as `UNSERVICEABLE_OVERLOAD` | `src/lib/validation/rules.ts:calculateRecommendedVehicle` | **COMPLETE** |
 | **Inaudible audio detection** | Detects markers (`[inaudible]`, noise) and asks user to repeat safely | `src/lib/speech/normalizer.ts:isUnusableAudio` | **COMPLETE** |
 | **Silence re-engagement** | 6s silence timer speaks gentle listening prompt without empty turn submission | `src/lib/speech/voiceSessionController.ts` | **COMPLETE** |
 | **Barge-in / interruption** | Instantly aborts ongoing SpeechSynthesis when user speaks | `src/lib/speech/voiceSessionController.ts` | **COMPLETE** |
@@ -375,13 +374,13 @@ porter-voice-agent/
 ### Domain & Logistics Assumptions
 - **Operational Pilot Hubs**: The agent is scoped to intra-city moves within pilot hubs (Bengaluru and Kochi). Inter-city routes (e.g. Bengaluru to Kochi) and out-of-scope destinations are rejected as unserviceable.
 - **Fleet Capacity Limits**: Vehicles are allocated deterministically:
-  - **2-Wheeler**: $\le 25\text{ cu ft}$, $\le 30\text{ kg}$
-  - **3-Wheeler**: $\le 60\text{ cu ft}$, $\le 150\text{ kg}$
-  - **Tata Ace**: $\le 240\text{ cu ft}$, $\le 850\text{ kg}$
-  - **8ft Pickup Truck**: $\le 400\text{ cu ft}$, $\le 1250\text{ kg}$
-  - **14ft Canter Truck**: $\le 600\text{ cu ft}$, $\le 2500\text{ kg}$
-  - **Overload**: Cargo exceeding $2500\text{ kg}$ or $600\text{ cu ft}$ is categorized as `UNSERVICEABLE_OVERLOAD` and blocked from confirmation.
-- **Floor & Elevator Rules**: Ground floor moves require no elevator check. Moves on floors $> 0$ mandate explicit elevator confirmation. Stairs without an elevator automatically allocate extra helper crew.
+  - **2-Wheeler**: ≤ 25 cu ft, ≤ 30 kg
+  - **3-Wheeler**: ≤ 60 cu ft, ≤ 150 kg
+  - **Tata Ace**: ≤ 240 cu ft, ≤ 850 kg
+  - **8ft Pickup Truck**: ≤ 400 cu ft, ≤ 1250 kg
+  - **14ft Canter Truck**: ≤ 600 cu ft, ≤ 2500 kg
+  - **Overload**: Cargo exceeding 2500 kg or 600 cu ft is categorized as `UNSERVICEABLE_OVERLOAD` and blocked from confirmation.
+- **Floor & Elevator Rules**: Ground floor moves require no elevator check. Moves on floors > 0 mandate explicit elevator confirmation. Stairs without an elevator automatically allocate extra helper crew.
 
 ### Technical Limitations
 - **Browser Web Speech API**: Native voice recognition relies on browser support (`webkitSpeechRecognition` / `SpeechRecognition` and `speechSynthesis`). Supported on Chrome, Edge, and Safari. Browsers lacking Web Speech API support automatically fallback to the accessible text input.
