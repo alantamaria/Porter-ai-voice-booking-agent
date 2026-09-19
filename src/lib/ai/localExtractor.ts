@@ -40,7 +40,36 @@ export function parseLocalDelta(userUtterance: string, currentState?: BookingSta
     delta.userIntent = 'CLARIFICATION';
   }
 
-  // 0.2 Greeting / casual conversation / filler detection (before off-topic)
+  // 0.2 Confirmation detection (takes priority over greetings/fillers, especially in review phase)
+  const isConfirmKeyword =
+    /\b(confirm|confirmed|confirming|confirmation)\b/i.test(lower) ||
+    /confirmed\s+a\s+year/i.test(lower) ||
+    /confirm\s+(it\s+)?(yeah|yes|yep|here)/i.test(lower);
+
+  const inReviewPhase =
+    currentState?.phase === 'REQUIREMENTS_REVIEW' ||
+    (currentState?.metadata?.missingMandatoryFields &&
+      currentState.metadata.missingMandatoryFields.length === 0 &&
+      currentState.phase !== 'GREETING');
+
+  const isAffirmativePhrase =
+    /^(yes|yeah|yep|yup|sure|ok|okay|alright|correct|right|fine|perfect|done|yes\s+please|please\s+do|book\s+it)[.!,\s]*$/i.test(lower) ||
+    lower.includes('looks good') ||
+    lower.includes('go ahead') ||
+    lower.includes('proceed') ||
+    lower.includes('confirm it') ||
+    lower.includes('confirm booking') ||
+    lower.includes('that is correct') ||
+    lower.includes("that's correct") ||
+    lower.includes("that's right") ||
+    lower.includes('all good');
+
+  if (isConfirmKeyword || (inReviewPhase && isAffirmativePhrase)) {
+    delta.userIntent = 'CONFIRMATION';
+    return delta;
+  }
+
+  // 0.3 Greeting / casual conversation / filler detection (before off-topic)
   // Only treat as non-booking if there's no booking-related content in the utterance
   const greetingPatterns = [
     /^hi[,!.\s]*$/,
@@ -79,8 +108,13 @@ export function parseLocalDelta(userUtterance: string, currentState?: BookingSta
     /^ok(ay)?[.!,\s]*$/i,
     /^sure[.!,\s]*$/i,
     /^alright[.!,\s]*$/i,
-    /^thanks?(\s+you)?[.!,\s]*$/i,
-    /^thank\s+you[.!,\s]*$/i,
+    /^thanks?(\s+you|\s+u|\s+a\s+lot|\s+so\s+much)?[.!,\s]*$/i,
+    /^thank\s*(you|u)[.!,\s]*$/i,
+    /^thanku[.!,\s]*$/i,
+    /^thank\s+you\s+(so\s+much|very\s+much|porter)[.!,\s]*$/i,
+    /^thx[.!,\s]*$/i,
+    /^appreciate\s+it[.!,\s]*$/i,
+    /^(okay\s+)?(bye|goodbye)[.!,\s]*$/i,
     /^no\s+problem[.!,\s]*$/i,
     /^nothing(\s+yet)?[.!,\s]*$/i,
     /^not\s+yet[.!,\s]*$/i,
@@ -120,10 +154,18 @@ export function parseLocalDelta(userUtterance: string, currentState?: BookingSta
   const bookingIntentPatterns = [
     /\b(i\s+want\s+to|i\s+need\s+to|can\s+i|please|help\s+me)\s+(book|schedule|hire)\b/i,
     /\b(i\s+want\s+to|i\s+need\s+to|can\s+i|please|help\s+me)\s+(move|shift|transport|send|deliver)\b/i,
-    /\b(book\s+a\s+(porter|truck|tempo|vehicle|move|delivery|pickup))\b/i,
-    /\b(need\s+a\s+(porter|truck|tempo|vehicle|mini\s+truck))\b/i,
-    /\b(book\s+(porter|move|truck|tempo))\b/i,
-    /\b(want\s+to\s+book|need\s+to\s+book)\b/i
+    /\b(need|want|make|create|start|do|get|have)\s+(a\s+)?(booking|reservation)\b/i,
+    /\b(i\s+need|i\s+want|we\s+need|we\s+want)\s+(a\s+)?(booking|move|relocation|truck|porter|tempo|vehicle|mini\s+truck)\b/i,
+    /\b(need|want)\s+(a\s+)?(porter|truck|tempo|vehicle|mini\s+truck|booking|move)\b/i,
+    /\b(book\s+a\s+(porter|truck|tempo|vehicle|move|delivery|pickup|booking|service))\b/i,
+    /\b(book\s+(porter|move|truck|tempo|service|delivery))\b/i,
+    /\b(want\s+to\s+book|need\s+to\s+book|like\s+to\s+book)\b/i,
+    /\b(house\s+shifting|home\s+shifting|room\s+shifting|office\s+shifting|shifting|relocation)\b/i,
+    /\b(shift\s+(my\s+)?(house|home|room|office|items|goods|furniture))\b/i,
+    /\b(help\s+(me\s+)?(to\s+)?(move|shift|relocate|transport))\b/i,
+    /\b^(book|booking|relocate|relocation)$/i,
+    /\b(transport\s+(my\s+)?(items|goods|furniture|cargo|luggage))\b/i,
+    /\b(move\s+(my\s+)?(items|goods|furniture|stuff|house|home|room))\b/i
   ];
   if (bookingIntentPatterns.some(p => p.test(text))) {
     delta.userIntent = 'BOOKING';
@@ -145,17 +187,8 @@ export function parseLocalDelta(userUtterance: string, currentState?: BookingSta
     return delta;
   }
 
-  // 2. Confirmation
-  if (
-    lower === 'yes' ||
-    lower === 'confirm' ||
-    lower === 'yes confirm' ||
-    lower.includes('confirm booking') ||
-    lower.includes('confirm it') ||
-    lower.includes('go ahead') ||
-    lower.includes('looks good') ||
-    lower.includes('proceed')
-  ) {
+  // 2. Confirmation (fallback)
+  if (isConfirmKeyword || isAffirmativePhrase) {
     delta.userIntent = 'CONFIRMATION';
     return delta;
   }
@@ -334,7 +367,17 @@ export function parseLocalDelta(userUtterance: string, currentState?: BookingSta
         delta.dropoffLocation = normalizeLocation(loc);
       } else if (!lower.includes('somewhere near ' + loc) && !lower.includes('somewhere around ' + loc)) {
         if (!delta.pickupLocation) {
-          delta.pickupLocation = normalizeLocation(loc);
+          if (
+            currentState?.pickup?.normalizedLocation &&
+            !currentState?.dropoff?.normalizedLocation &&
+            !lower.includes('from') &&
+            !lower.includes('pickup') &&
+            !lower.includes('pick up')
+          ) {
+            delta.dropoffLocation = normalizeLocation(loc);
+          } else {
+            delta.pickupLocation = normalizeLocation(loc);
+          }
         } else if (!delta.dropoffLocation && loc !== delta.pickupLocation.toLowerCase()) {
           delta.dropoffLocation = normalizeLocation(loc);
         }
@@ -343,46 +386,142 @@ export function parseLocalDelta(userUtterance: string, currentState?: BookingSta
   }
 
 
-  // 8. Dates
-  if (
+  // 8. Dates & Date Ambiguity
+  const weekdays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+  const matchedWeekdays: string[] = [];
+  for (const wd of weekdays) {
+    if (new RegExp(`\\b(next\\s+|this\\s+|on\\s+)?${wd}\\b`, 'i').test(lower)) {
+      matchedWeekdays.push(wd);
+    }
+  }
+
+  const hasDayAfterTomorrow =
     lower.includes('day after tomorrow') ||
     lower.includes('the day after tomorrow') ||
-    lower.includes('after tomorrow')
-  ) {
-    delta.scheduleDate = 'day after tomorrow';
-  } else if (lower.includes('tomorrow')) {
-    delta.scheduleDate = 'tomorrow';
-  } else if (lower.includes('day before yesterday')) {
-    delta.scheduleDate = 'day before yesterday';
-  } else if (lower.includes('yesterday')) {
-    delta.scheduleDate = 'yesterday';
-  } else if (lower.includes('today') || lower.includes('tonight')) {
-    delta.scheduleDate = 'today';
-  } else {
-    const weekdays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-    let weekdayFound = false;
-    for (const wd of weekdays) {
-      if (new RegExp(`\\b(next\\s+|this\\s+|on\\s+)?${wd}\\b`, 'i').test(lower)) {
-        delta.scheduleDate = wd;
-        weekdayFound = true;
-        break;
-      }
-    }
+    lower.includes('after tomorrow');
 
-    // Natural date strings: "21st September 2026", "September 21 2026", "3rd October"
-    if (!weekdayFound) {
-      const naturalDateMatch = cleanedText.match(
-        /\b(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(\d{4}))?\b/i
-      ) || cleanedText.match(
-        /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s*,?\s*(\d{4}))?\b/i
-      );
-      if (naturalDateMatch) {
-        // Normalize ordinal suffixes and pass through to validateBookingDate
-        const cleanedDateStr = cleanedText
-          .replace(/(\d+)(?:st|nd|rd|th)\b/gi, (m: string, d: string) => d)
-          .trim();
-        delta.scheduleDate = cleanedDateStr;
+  const hasTomorrow = hasDayAfterTomorrow
+    ? lower.replace(/day after tomorrow|the day after tomorrow|after tomorrow/gi, '').includes('tomorrow')
+    : lower.includes('tomorrow');
+
+  const hasDayBeforeYesterday = lower.includes('day before yesterday');
+  const hasYesterday = hasDayBeforeYesterday
+    ? lower.replace(/day before yesterday/gi, '').includes('yesterday')
+    : lower.includes('yesterday');
+
+  const hasToday = /\b(today|tonight)\b/i.test(lower);
+  const hasNextWeek = /\b(next week|sometime next week|this week|any day next week)\b/i.test(lower);
+  const hasWeekend = /\b(this weekend|next weekend|on the weekend)\b/i.test(lower);
+
+  // Check multi-natural date (e.g. "21st or 22nd September")
+  const multiNaturalDateMatch = cleanedText.match(
+    /\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:or|,|\/)\s*(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(\d{4}))?\b/i
+  );
+
+  if (matchedWeekdays.length > 1) {
+    // Multiple weekdays mentioned (e.g. "Monday, Tuesday. Wednesday, Thursday, Friday." or "Monday or Tuesday")
+    delta.isDateAmbiguous = true;
+    delta.userIntent = 'CLARIFICATION';
+    const formattedDays = matchedWeekdays.map(d => d.charAt(0).toUpperCase() + d.slice(1)).join(', ');
+    delta.ambiguities = [
+      {
+        field: 'date',
+        suspectedValues: matchedWeekdays,
+        userUtterance: text,
+        severity: 'BLOCKING',
+        clarificationPrompt: `You mentioned multiple days (${formattedDays}). Which specific date would you like to schedule your move for?`
       }
+    ];
+  } else if (multiNaturalDateMatch) {
+    delta.isDateAmbiguous = true;
+    delta.userIntent = 'CLARIFICATION';
+    const d1 = multiNaturalDateMatch[1];
+    const d2 = multiNaturalDateMatch[2];
+    const month = multiNaturalDateMatch[3].charAt(0).toUpperCase() + multiNaturalDateMatch[3].slice(1).toLowerCase();
+    delta.ambiguities = [
+      {
+        field: 'date',
+        suspectedValues: [`${d1} ${month}`, `${d2} ${month}`],
+        userUtterance: text,
+        severity: 'BLOCKING',
+        clarificationPrompt: `You mentioned multiple dates (${d1} or ${d2} ${month}). Which specific date would you like to schedule your move for?`
+      }
+    ];
+  } else if (
+    (hasTomorrow && matchedWeekdays.length > 0) ||
+    (hasToday && matchedWeekdays.length > 0) ||
+    (hasTomorrow && hasDayAfterTomorrow)
+  ) {
+    delta.isDateAmbiguous = true;
+    delta.userIntent = 'CLARIFICATION';
+    const candidateDays = [
+      ...(hasToday ? ['Today'] : []),
+      ...(hasTomorrow ? ['Tomorrow'] : []),
+      ...(hasDayAfterTomorrow ? ['Day after tomorrow'] : []),
+      ...matchedWeekdays.map(d => d.charAt(0).toUpperCase() + d.slice(1))
+    ];
+    delta.ambiguities = [
+      {
+        field: 'date',
+        suspectedValues: candidateDays,
+        userUtterance: text,
+        severity: 'BLOCKING',
+        clarificationPrompt: `You mentioned multiple dates (${candidateDays.join(', ')}). Which specific date would you prefer?`
+      }
+    ];
+  } else if (hasNextWeek && matchedWeekdays.length === 0) {
+    delta.isDateAmbiguous = true;
+    delta.userIntent = 'CLARIFICATION';
+    delta.ambiguities = [
+      {
+        field: 'date',
+        suspectedValues: ['next week'],
+        userUtterance: text,
+        severity: 'BLOCKING',
+        clarificationPrompt: 'Which specific date next week would you like to schedule your move for?'
+      }
+    ];
+  } else if (hasWeekend && matchedWeekdays.length === 0) {
+    delta.isDateAmbiguous = true;
+    delta.userIntent = 'CLARIFICATION';
+    delta.ambiguities = [
+      {
+        field: 'date',
+        suspectedValues: ['Saturday', 'Sunday'],
+        userUtterance: text,
+        severity: 'BLOCKING',
+        clarificationPrompt: 'Would you prefer Saturday or Sunday for your move?'
+      }
+    ];
+  } else if (hasDayAfterTomorrow) {
+    delta.scheduleDate = 'day after tomorrow';
+  } else if (hasTomorrow) {
+    delta.scheduleDate = 'tomorrow';
+  } else if (hasDayBeforeYesterday) {
+    delta.scheduleDate = 'day before yesterday';
+  } else if (hasYesterday) {
+    delta.scheduleDate = 'yesterday';
+  } else if (hasToday) {
+    delta.scheduleDate = 'today';
+  } else if (matchedWeekdays.length === 1) {
+    delta.scheduleDate = matchedWeekdays[0];
+  } else {
+    // Natural date strings: "21st September 2026", "September 21 2026", "3rd October", "10/09/2026", "10-09-2026", "2026-09-10"
+    const naturalDateMatch = cleanedText.match(
+      /\b(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(\d{4}))?\b/i
+    ) || cleanedText.match(
+      /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s*,?\s*(\d{4}))?\b/i
+    );
+    const numericDateMatch = cleanedText.match(/\b(\d{4}-\d{2}-\d{2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\b/);
+
+    if (naturalDateMatch) {
+      // Normalize ordinal suffixes and pass through to validateBookingDate
+      const cleanedDateStr = cleanedText
+        .replace(/(\d+)(?:st|nd|rd|th)\b/gi, (m: string, d: string) => d)
+        .trim();
+      delta.scheduleDate = cleanedDateStr;
+    } else if (numericDateMatch) {
+      delta.scheduleDate = numericDateMatch[1];
     }
   }
 
@@ -413,39 +552,54 @@ export function parseLocalDelta(userUtterance: string, currentState?: BookingSta
     const itemsToAdd: Array<{ name: string; quantity: number }> = [];
     const sortedItemNames = Object.keys(KNOWN_ITEM_CATALOG).sort((a, b) => b.length - a.length);
     for (const itemName of sortedItemNames) {
-      // Use word boundary matching to prevent substring false positives
-      // e.g. 'ac' must not match inside 'actually'
-      const itemBoundaryRegex = new RegExp(`\\b${itemName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-      if (itemBoundaryRegex.test(lowerOriginal)) {
-        // Prevent duplicate matching for box / boxes and bed / double bed
-        if (itemName === 'box' && itemsToAdd.some(i => i.name === 'boxes' || i.name === 'carton box')) {
-          continue;
-        }
-        if (itemName === 'bed' && itemsToAdd.some(i => i.name.includes('bed'))) {
-          continue;
-        }
-        if (itemName === 'sofa' && itemsToAdd.some(i => i.name.includes('sofa'))) {
-          continue;
-        }
+        // Use word boundary matching to prevent substring false positives
+        // e.g. 'ac' must not match inside 'actually', but allow plural forms like 'beds', 'sofas', 'tables'
+        const escapedName = itemName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const itemBoundaryRegex = new RegExp(`\\b${escapedName}(?:s|es)?\\b`, 'i');
+        if (itemBoundaryRegex.test(lowerOriginal)) {
+          // Prevent duplicate matching for box / boxes and bed / double bed
+          if (itemName === 'box' && itemsToAdd.some(i => i.name === 'boxes' || i.name === 'carton box')) {
+            continue;
+          }
+          if (itemName === 'bed' && itemsToAdd.some(i => i.name.includes('bed'))) {
+            continue;
+          }
+          if (itemName === 'sofa' && itemsToAdd.some(i => i.name.includes('sofa'))) {
+            continue;
+          }
 
-        const qtyMatch = lower.match(new RegExp(`(\\d+|one|two|three|four|five|six|seven|eight|nine|ten)\\s+${itemName}`, 'i'));
-        let qty = 1;
-        if (qtyMatch) {
-          const w = qtyMatch[1].toLowerCase();
-          const wordMap: Record<string, number> = {
-            one: 1, two: 2, three: 3, four: 4, five: 5,
-            six: 6, seven: 7, eight: 8, nine: 9, ten: 10
-          };
-          qty = wordMap[w] || parseInt(w, 10) || 1;
+          const qtyMatch = lower.match(new RegExp(`(\\d+|one|two|three|four|five|six|seven|eight|nine|ten)\\s+${escapedName}(?:s|es)?`, 'i'));
+          let qty = 1;
+          if (qtyMatch) {
+            const w = qtyMatch[1].toLowerCase();
+            const wordMap: Record<string, number> = {
+              one: 1, two: 2, three: 3, four: 4, five: 5,
+              six: 6, seven: 7, eight: 8, nine: 9, ten: 10
+            };
+            qty = wordMap[w] || parseInt(w, 10) || 1;
+          }
+          itemsToAdd.push({ name: itemName, quantity: qty });
         }
-        itemsToAdd.push({ name: itemName, quantity: qty });
+      }
+      if (itemsToAdd.length > 0) {
+        delta.itemsToAdd = itemsToAdd;
+        delta.isVagueInventory = false;
       }
     }
-    if (itemsToAdd.length > 0) {
-      delta.itemsToAdd = itemsToAdd;
-      delta.isVagueInventory = false;
-    }
-  }
 
-  return delta;
-}
+    // If the utterance contained booking keywords and was not a greeting, confirmation, or cancellation,
+    // and no specific fields were extracted, treat it as an affirmative booking intent so the agent begins gathering details
+    if (
+      hasBookingContent &&
+      delta.userIntent === 'PROVIDE_INFORMATION' &&
+      !delta.pickupLocation &&
+      !delta.dropoffLocation &&
+      !delta.scheduleDate &&
+      !delta.scheduleTime &&
+      (!delta.itemsToAdd || delta.itemsToAdd.length === 0)
+    ) {
+      delta.userIntent = 'BOOKING';
+    }
+
+    return delta;
+  }

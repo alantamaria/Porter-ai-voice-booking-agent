@@ -718,4 +718,230 @@ describe('STEP 4: Conversation Manager & Next-Action Determinism', () => {
     assert.ok(state.schedule.parsedDate, 'Expected parsedDate to be populated');
     assert.equal(t2.action.type, 'ASK_FOR_MISSING_INFORMATION');
   });
+
+  // 42. Speech recognition confirmation variation "Confirmed a year." confirms booking
+  it('42. Speech recognition phonetic variation "Confirmed a year." confirms complete booking', async () => {
+    const state = createInitialBookingState('test-confirm-stt');
+    state.pickup.normalizedLocation = 'Kakkanad';
+    state.pickup.verified = true;
+    state.dropoff.normalizedLocation = 'Kochi';
+    state.dropoff.verified = true;
+    state.schedule.parsedDate = '2026-09-24';
+    state.schedule.parsedTimeSlot = '2:00 PM';
+    state.schedule.isValid = true;
+    state.inventory.items = [makeTestItem('sofa')];
+    state.phase = 'REQUIREMENTS_REVIEW';
+    state.metadata.missingMandatoryFields = [];
+
+    // Parse with local deterministic extractor as used in development/no-API mode
+    const delta = parseLocalDelta('Confirmed a year.', state);
+    assert.equal(delta.userIntent, 'CONFIRMATION');
+
+    const res = await processUserTurn(
+      { userUtterance: 'Confirmed a year.', currentState: state },
+      createMockClient(delta)
+    );
+
+    assert.equal(res.action.type, 'CONFIRM_BOOKING');
+    assert.equal(res.updatedState.phase, 'BOOKING_CONFIRMED');
+    assert.equal(res.updatedState.confirmationStatus, 'CONFIRMED');
+    assert.equal(res.bookingConfirmed, true);
+    assert.match(res.responseText, /confirmed/i);
+  });
+
+  // 43. "Sure", "Confirmed", and "Confirm" in REQUIREMENTS_REVIEW transition to BOOKING_CONFIRMED
+  it('43. Affirmative responses in review phase transition cleanly to BOOKING_CONFIRMED', async () => {
+    const testPhrases = ['Confirmed', 'Confirm', 'Sure', 'Yes please', 'Looks good'];
+
+    for (const phrase of testPhrases) {
+      const state = createInitialBookingState(`test-${phrase}`);
+      state.pickup.normalizedLocation = 'Kakkanad';
+      state.pickup.verified = true;
+      state.dropoff.normalizedLocation = 'Kochi';
+      state.dropoff.verified = true;
+      state.schedule.parsedDate = '2026-09-24';
+      state.schedule.parsedTimeSlot = '2:00 PM';
+      state.schedule.isValid = true;
+      state.inventory.items = [makeTestItem('sofa')];
+      state.phase = 'REQUIREMENTS_REVIEW';
+      state.metadata.missingMandatoryFields = [];
+
+      const delta = parseLocalDelta(phrase, state);
+      assert.equal(delta.userIntent, 'CONFIRMATION', `Expected ${phrase} to be CONFIRMATION`);
+
+      const res = await processUserTurn(
+        { userUtterance: phrase, currentState: state },
+        createMockClient(delta)
+      );
+
+      assert.equal(res.action.type, 'CONFIRM_BOOKING', `Expected ${phrase} to trigger CONFIRM_BOOKING`);
+      assert.equal(res.updatedState.phase, 'BOOKING_CONFIRMED');
+      assert.equal(res.updatedState.confirmationStatus, 'CONFIRMED');
+    }
+  });
+
+  // 44. Multiple weekdays mentioned ("Monday, Tuesday. Wednesday, Thursday, Friday.") triggers ASK_FOR_CLARIFICATION
+  it('44. Multiple weekdays mentioned trigger ASK_FOR_CLARIFICATION for date without guessing', async () => {
+    const state = createInitialBookingState('test-multi-weekdays');
+
+    const utterance = 'Monday, Tuesday. Wednesday, Thursday, Friday.';
+    const delta = parseLocalDelta(utterance, state);
+
+    assert.equal(delta.isDateAmbiguous, true);
+    assert.equal(delta.userIntent, 'CLARIFICATION');
+    assert.equal(delta.scheduleDate, undefined);
+    assert.ok(delta.ambiguities && delta.ambiguities.length > 0);
+    assert.equal(delta.ambiguities[0].field, 'date');
+
+    const res = await processUserTurn(
+      { userUtterance: utterance, currentState: state },
+      createMockClient(delta)
+    );
+
+    assert.equal(res.action.type, 'ASK_FOR_CLARIFICATION');
+    assert.equal(res.action.payload?.targetField, 'date');
+    assert.equal(res.updatedState.phase, 'RESOLVING_AMBIGUITY');
+    assert.equal(res.updatedState.schedule.parsedDate, undefined);
+    assert.match(res.responseText, /multiple days/i);
+    assert.match(res.responseText, /Monday, Tuesday, Wednesday, Thursday, Friday/i);
+    assert.match(res.responseText, /which specific date/i);
+  });
+
+  // 45. Single weekday out-of-order acknowledges date naturally instead of generic "Sure!"
+  it('45. Single weekday out-of-order acknowledges date naturally', async () => {
+    const state = createInitialBookingState('test-single-weekday');
+
+    const utterance = 'Monday';
+    const delta = parseLocalDelta(utterance, state);
+
+    assert.equal(delta.isDateAmbiguous, false || undefined);
+    assert.equal(delta.scheduleDate, 'monday');
+
+    const res = await processUserTurn(
+      { userUtterance: utterance, currentState: state },
+      createMockClient(delta)
+    );
+
+    assert.equal(res.action.type, 'ASK_FOR_MISSING_INFORMATION');
+    assert.equal(res.action.payload?.targetField, 'pickup_and_dropoff');
+    assert.ok(res.updatedState.schedule.parsedDate !== undefined);
+    assert.match(res.responseText, /Got it, /i);
+    assert.match(res.responseText, /Where should we pick the items up from, and where are they going\?/i);
+  });
+
+  // 46. Vague dates ("sometime next week" and "this weekend") trigger ASK_FOR_CLARIFICATION
+  it('46. Vague dates trigger ASK_FOR_CLARIFICATION for date', async () => {
+    const state1 = createInitialBookingState('test-next-week');
+    const delta1 = parseLocalDelta('I want to move sometime next week', state1);
+    assert.equal(delta1.isDateAmbiguous, true);
+    const res1 = await processUserTurn(
+      { userUtterance: 'I want to move sometime next week', currentState: state1 },
+      createMockClient(delta1)
+    );
+    assert.equal(res1.action.type, 'ASK_FOR_CLARIFICATION');
+    assert.equal(res1.action.payload?.targetField, 'date');
+    assert.match(res1.responseText, /next week/i);
+
+    const state2 = createInitialBookingState('test-weekend');
+    const delta2 = parseLocalDelta('Moving this weekend', state2);
+    assert.equal(delta2.isDateAmbiguous, true);
+    const res2 = await processUserTurn(
+      { userUtterance: 'Moving this weekend', currentState: state2 },
+      createMockClient(delta2)
+    );
+    assert.equal(res2.action.type, 'ASK_FOR_CLARIFICATION');
+    assert.equal(res2.action.payload?.targetField, 'date');
+    assert.match(res2.responseText, /Saturday or Sunday/i);
+  });
+
+  // 47. "I need a booking." responds to the user's request rather than repeating greeting
+  it('47. "I need a booking." after greeting responds with booking question, not greeting', async () => {
+    let state = createInitialBookingState('test-need-booking');
+
+    // Turn 1: User says "How are you?"
+    const delta1 = parseLocalDelta('How are you?', state);
+    assert.equal(delta1.userIntent, 'GREETING');
+    const res1 = await processUserTurn(
+      { userUtterance: 'How are you?', currentState: state },
+      createMockClient(delta1)
+    );
+    assert.equal(res1.action.type, 'HANDLE_GREETING');
+    assert.match(res1.responseText, /doing well/i);
+    state = res1.updatedState;
+
+    // Turn 2: User says "I need a booking."
+    const delta2 = parseLocalDelta('I need a booking.', state);
+    assert.equal(delta2.userIntent, 'BOOKING');
+
+    const res2 = await processUserTurn(
+      { userUtterance: 'I need a booking.', currentState: state },
+      createMockClient(delta2)
+    );
+    assert.equal(res2.action.type, 'ASK_FOR_MISSING_INFORMATION');
+    assert.equal(res2.action.payload?.targetField, 'pickup_and_dropoff');
+    assert.ok(!res2.responseText.includes('How can I help you today?'));
+    assert.match(res2.responseText, /Where should we pick the items up from/i);
+  });
+
+  // 48. Answering standalone location when pickup is known sets dropoff
+  it('48. Answering standalone location when pickup is known sets dropoff', () => {
+    const state = createInitialBookingState('test-sequential-loc');
+    state.pickup.normalizedLocation = 'Koramangala';
+    state.pickup.verified = true;
+
+    const delta = parseLocalDelta('Indiranagar', state);
+    assert.equal(delta.dropoffLocation, 'Indiranagar');
+    assert.equal(delta.pickupLocation, undefined);
+  });
+
+  // 49. Plural inventory words are extracted correctly
+  it('49. Plural inventory items are extracted correctly', () => {
+    const state = createInitialBookingState('test-plurals');
+    const delta = parseLocalDelta('2 beds and 2 sofas', state);
+    assert.ok(delta.itemsToAdd && delta.itemsToAdd.length === 2);
+    const bedItem = delta.itemsToAdd.find(i => i.name === 'bed');
+    const sofaItem = delta.itemsToAdd.find(i => i.name === 'sofa');
+    assert.equal(bedItem?.quantity, 2);
+    assert.equal(sofaItem?.quantity, 2);
+  });
+
+  // 50. "Thank you." after booking confirmed replies with "You're welcome!"
+  it('50. "Thank you" and "thanku" after booking confirmed replies warmly, not with greeting', async () => {
+    const state = createInitialBookingState('test-gratitude');
+    state.phase = 'BOOKING_CONFIRMED';
+    state.confirmationStatus = 'CONFIRMED';
+
+    for (const phrase of ['Thank you.', 'thanku', 'Thanks!']) {
+      const delta = parseLocalDelta(phrase, state);
+      const res = await processUserTurn(
+        { userUtterance: phrase, currentState: state },
+        createMockClient(delta)
+      );
+
+      assert.equal(res.action.type, 'HANDLE_GREETING');
+      assert.match(res.responseText, /You're welcome!/i);
+      assert.ok(!res.responseText.includes('How can I help you today?'));
+    }
+  });
+
+  // 51. "Thank you." during active booking acknowledges gratitude and continues
+  it('51. "Thank you" during active booking acknowledges gratitude and prompts for missing field', async () => {
+    const state = createInitialBookingState('test-active-gratitude');
+    state.pickup.normalizedLocation = 'Koramangala';
+    state.pickup.verified = true;
+    // Missing dropoff, date, time, items
+
+    const delta = parseLocalDelta('Thank you.', state);
+    const res = await processUserTurn(
+      { userUtterance: 'Thank you.', currentState: state },
+      createMockClient(delta)
+    );
+
+    assert.equal(res.action.type, 'HANDLE_GREETING');
+    assert.match(res.responseText, /You're welcome!/i);
+    assert.match(res.responseText, /drop-off destination/i);
+  });
 });
+
+
+

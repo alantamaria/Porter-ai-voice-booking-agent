@@ -11,8 +11,6 @@ import {
   Calendar,
   Clock,
   Box,
-  Truck,
-  Users,
   AlertTriangle,
   ClipboardList,
 } from 'lucide-react';
@@ -30,7 +28,7 @@ export const BookingSummary: React.FC<BookingSummaryProps> = ({
   onMakeCorrection,
   onResetBooking,
 }) => {
-  const { pickup, dropoff, schedule, inventory, logistics, metadata, phase } = state;
+  const { pickup, dropoff, schedule, inventory, metadata, phase } = state;
 
   // Determine field statuses
   const pickupStatus: FieldStatus = pickup.verified ? 'valid' : 'missing';
@@ -177,26 +175,6 @@ export const BookingSummary: React.FC<BookingSummaryProps> = ({
               </span>
             )}
           </BookingField>
-
-          {/* Logistics Recommendation (fleet & helpers) */}
-          <div className="logistics-info-card">
-            <div className="logistics-row">
-              <div className="logistics-col">
-                <span className="logistics-label">
-                  <Truck className="icon-xxs text-primary" aria-hidden="true" /> Recommended Fleet
-                </span>
-                <span className="logistics-value">{logistics.vehicleDisplayName}</span>
-              </div>
-              <div className="logistics-col">
-                <span className="logistics-label">
-                  <Users className="icon-xxs text-primary" aria-hidden="true" /> Helpers
-                </span>
-                <span className="logistics-value">
-                  {logistics.helpersRequired} Assistant{logistics.helpersRequired === 1 ? '' : 's'}
-                </span>
-              </div>
-            </div>
-          </div>
         </div>
       )}
     </aside>

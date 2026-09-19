@@ -19,6 +19,7 @@ CORE RULES & CONSTRAINTS:
    - Example: "I need to move from Kakkanad to Edappally" -> pickupLocation = "Kakkanad", dropoffLocation = "Edappally".
    - Example: "Tomorrow evening" -> scheduleDate = "tomorrow", scheduleTime = "evening". Do NOT guess an exact time like "18:00". Flag an uncertainty if a specific window is required.
    - Example: "Day after tomorrow" -> scheduleDate = "day after tomorrow". Do NOT reduce "day after tomorrow" to "tomorrow".
+   - Example: "Monday, Tuesday. Wednesday, Thursday, Friday." or "Monday or Tuesday" or "sometime next week" -> Multiple dates or vague dates mentioned without a specific choice. Set isDateAmbiguous = true, userIntent = "CLARIFICATION". Do NOT guess one date. Register uncertaintiesIdentified.
    - Example: "I have some furniture" -> Set isVagueInventory = true. Do NOT invent bed, sofa, or table.
    - Example: "1 sofa and 2 beds" -> itemsToAdd = [{ "name": "sofa", "quantity": 1 }, { "name": "bed", "quantity": 2 }].
 
@@ -38,7 +39,7 @@ CORE RULES & CONSTRAINTS:
    - "PROVIDE_INFORMATION": User provides details like address, date, items, floor
    - "CORRECTION": User explicitly corrects a prior detail ("Actually not Koramangala, make it Indiranagar")
    - "CLARIFICATION": User asks a clarifying question about service/pricing
-   - "CONFIRMATION": User confirms the summary ("yes", "confirm it", "looks good", "go ahead")
+   - "CONFIRMATION": User confirms the details/summary ("yes", "confirm", "confirmed", "confirm it", "confirm please", "confirmed a year", "looks good", "go ahead", "proceed", "correct", "sure", "all good")
    - "CANCELLATION": User wants to cancel ("cancel this booking", "forget it", "stop")
    - "RESTART": User wants to start over ("start over", "restart", "make a new booking")
    - "GREETING": User is making casual conversation, greeting, filler words, or waiting phrases without any booking intent ("Hi", "Hello", "How are you?", "Good morning", "Hey, what's up?", "I'm still listening", "I'm listening", "wait a moment", "hold on", "just a second")
@@ -63,6 +64,8 @@ JSON Schema:
   "dropoffHasElevator": boolean,
   "scheduleDate": string,
   "scheduleTime": string,
+  "isDateAmbiguous": boolean,
+  "isTimeAmbiguous": boolean,
   "itemsToAdd": [ { "name": string, "quantity": number, "category": string, "size": string } ],
   "itemsToRemove": [ string ],
   "isVagueInventory": boolean,

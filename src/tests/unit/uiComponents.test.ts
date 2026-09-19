@@ -298,8 +298,6 @@ describe('STEP 6: Evaluator-Facing UI Components Test Suite', () => {
     assert.ok(html.includes('3:00 PM'));
     assert.ok(html.includes('1x Sofa'));
     assert.ok(html.includes('4x Carton Boxes'));
-    assert.ok(html.includes('Tata Ace (750 kg)'));
-    assert.ok(html.includes('Driver Assistant'));
     assert.ok(html.includes('Confirm booking'));
     assert.ok(html.includes('Make a correction'));
 
@@ -326,7 +324,6 @@ describe('STEP 6: Evaluator-Facing UI Components Test Suite', () => {
     assert.ok(html.includes('Booking confirmed'));
     assert.ok(html.includes('Your booking details have been confirmed in this assistant'));
     assert.ok(html.includes('Start a new booking'));
-    assert.ok(html.includes('Export requirements JSON'));
 
     // Crucial: No fabricated driver assignment or tracking claims
     assert.ok(!html.includes('Driver assigned'));

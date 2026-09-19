@@ -70,6 +70,7 @@ export const StateDeltaSchema = z.object({
   scheduleTime: z.string().optional(),
   time: z.string().optional(),
   timeText: z.string().optional(),
+  isDateAmbiguous: z.boolean().optional(),
   isTimeAmbiguous: z.boolean().optional(),
   isInventoryAmbiguous: z.boolean().optional(),
   itemsToAdd: z.array(z.object({

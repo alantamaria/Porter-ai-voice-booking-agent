@@ -198,6 +198,7 @@ export interface StateDelta {
   scheduleTime?: string;
   time?: string;
   timeText?: string;
+  isDateAmbiguous?: boolean;
   isTimeAmbiguous?: boolean;
   isInventoryAmbiguous?: boolean;
   itemsToAdd?: Array<{

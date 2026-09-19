@@ -36,18 +36,12 @@ export function generateReviewSummary(state: BookingState): string {
     ? state.inventory.items.map(i => `${i.quantity} ${i.name}`).join(', ')
     : 'None listed';
 
-  const vehicleStr = state.logistics.vehicleDisplayName || 'Standard Mini Truck';
-  const helpersStr = state.logistics.helpersRequired > 0
-    ? ` with ${state.logistics.helpersRequired} helper${state.logistics.helpersRequired > 1 ? 's' : ''}`
-    : '';
-
   return `Here is a summary of your move details:
 • Pickup: ${pickupStr}${pickupFloorStr}
 • Drop-off: ${dropoffStr}${dropoffFloorStr}
 • Date: ${dateStr}
 • Time: ${timeStr}
-• Items: ${itemsList}
-• Recommended Vehicle: ${vehicleStr}${helpersStr}`;
+• Items: ${itemsList}`;
 }
 
 /**
@@ -76,7 +70,7 @@ function getNextMissingPrompt(state: BookingState): string {
       : 'What time would you prefer for the pickup?';
   }
   if (missing.includes('items')) {
-    return 'What items are you planning to move? Please mention a few specific items and quantities.';
+    return 'What items are you planning to move?';
   }
   return `Could you tell me your ${missing[0]}?`;
 }
@@ -100,7 +94,14 @@ function deltaContainsBookingData(delta: StateDelta): boolean {
   }
 
   // Schedule data
-  if (delta.scheduleDate || delta.date || delta.scheduleTime || delta.time) {
+  if (
+    delta.scheduleDate ||
+    delta.date ||
+    delta.scheduleTime ||
+    delta.time ||
+    delta.isDateAmbiguous ||
+    delta.isTimeAmbiguous
+  ) {
     return true;
   }
 
@@ -220,6 +221,17 @@ export function determineNextAction(
 
 
   // 3. Blocking ambiguity / uncertainty
+  if (latestDelta?.isDateAmbiguous) {
+    return {
+      type: 'ASK_FOR_CLARIFICATION',
+      payload: {
+        targetField: 'date',
+        reason: 'Multiple dates or ambiguous schedule date mentioned',
+        uncertainty: latestDelta.ambiguities?.[0]
+      }
+    };
+  }
+
   if (latestDelta?.isInventoryAmbiguous || state.inventory.isVague) {
     return {
       type: 'ASK_FOR_CLARIFICATION',
@@ -297,9 +309,18 @@ export function determineNextAction(
   const missing = getMissingMandatoryFields(state);
 
   // 7. Check if user is trying to confirm
+  const userTextLower = (state.metadata.lastUserUtterance || '').toLowerCase();
+  const utteranceHasConfirm =
+    /\b(confirm|confirmed|confirming|confirmation)\b/i.test(userTextLower) ||
+    /confirmed\s+a\s+year/i.test(userTextLower) ||
+    /confirm\s+(it\s+)?(yeah|yes|yep|here)/i.test(userTextLower) ||
+    ((state.phase === 'REQUIREMENTS_REVIEW' || isBookingComplete(state)) &&
+      /^(yes|yeah|yep|yup|sure|ok|okay|alright|correct|right|that's\s+correct|looks\s+good|go\s+ahead|proceed|done|perfect|fine|yes\s+please)\b/i.test(userTextLower.trim()));
+
   const isConfirming =
     latestDelta?.userIntent === 'CONFIRMATION' ||
-    latestDelta?.userIntent === 'CONFIRMING';
+    latestDelta?.userIntent === 'CONFIRMING' ||
+    utteranceHasConfirm;
 
   if (isConfirming) {
     if (isBookingComplete(state)) {
@@ -413,12 +434,52 @@ export function generateDeterministicFallbackResponse(
       if (isWaitingOrFiller) {
         return "No problem, take your time. I'm listening.";
       }
-      return "Hi there! I'm doing well, thank you for asking. I'm your Porter moving assistant — whenever you're ready to book a move, just let me know!";
+
+      const isGratitude =
+        /\b(thank\s*you|thanks|thank\s*u|thanku|thx|appreciate\s+it|thankyou)\b/i.test(utterance);
+
+      if (isGratitude) {
+        if (state.phase === 'BOOKING_CONFIRMED' || state.confirmationStatus === 'CONFIRMED') {
+          return "You're welcome! Have a wonderful move with Porter!";
+        }
+        const missing = getMissingMandatoryFields(state);
+        if (missing.length > 0) {
+          const nextPrompt = getNextMissingPrompt(state);
+          return `You're welcome! ${nextPrompt}`;
+        }
+        return "You're welcome! How can I help you today?";
+      }
+
+      const isClosingOrGoodbye =
+        /\b(bye|goodbye|see\s+you|have\s+a\s+good\s+(day|one))\b/i.test(utterance);
+
+      if (isClosingOrGoodbye) {
+        return "Goodbye! Have a wonderful day, and thank you for choosing Porter!";
+      }
+
+      const isHowAreYou =
+        utterance.includes('how are you') ||
+        utterance.includes("how're you") ||
+        utterance.includes('how do you do') ||
+        utterance.includes("how's it going");
+
+      if (isHowAreYou) {
+        return "Hi! I'm doing well, thank you. How can I help you today?";
+      }
+
+      return "Hello! How can I help you today?";
     }
 
     case 'ASK_FOR_MISSING_INFORMATION': {
       const target = action.payload?.targetField;
       if (target === 'pickup_and_dropoff') {
+        if (delta?.scheduleDate || state.schedule.parsedDate) {
+          const dateStr = state.schedule.parsedDate || delta?.scheduleDate;
+          return `Got it, ${dateStr}! Where should we pick the items up from, and where are they going?`;
+        }
+        if (delta?.itemsToAdd && delta.itemsToAdd.length > 0) {
+          return "Got it! Where should we pick these items up from, and where are they going?";
+        }
         return "Sure! Where should we pick the items up from, and where are they going?";
       }
       if (target === 'pickup') {
@@ -436,25 +497,38 @@ export function generateDeterministicFallbackResponse(
           : "What time would you prefer for the pickup?";
       }
       if (target === 'items') {
-        return "What items are you planning to move? Please mention specific items and quantities, like 1 sofa or 2 beds.";
+        return "What items are you planning to move?";
       }
       if (target === 'floor') {
-        return "Which floor are we moving from, and is there an elevator available?";
+        return "Which floor, and is there an elevator available?";
       }
       return `Could you tell me the ${target || 'next detail'} for your booking?`;
     }
 
     case 'ASK_FOR_CLARIFICATION': {
       const target = action.payload?.targetField;
+      if (target === 'date' || action.payload?.uncertainty?.field === 'date') {
+        const unc = action.payload?.uncertainty || delta?.ambiguities?.find(a => a.field === 'date');
+        if (unc?.clarificationPrompt) {
+          return unc.clarificationPrompt;
+        }
+        if (unc?.suspectedValues && unc.suspectedValues.length > 1) {
+          const formattedDays = unc.suspectedValues
+            .map(v => v.charAt(0).toUpperCase() + v.slice(1))
+            .join(', ');
+          return `You mentioned multiple days (${formattedDays}). Which specific date would you like to schedule your move for?`;
+        }
+        return "Which specific date would you like to schedule your move for?";
+      }
       if (target === 'inventory') {
-        return "What specific items are you moving? For example, you can mention items like a sofa, bed, table, or boxes along with quantities.";
+        return "What specific items are you moving? Please include quantities, like 1 sofa or 2 beds.";
       }
       if (target === 'time') {
         const timeRef = delta?.timeText ? ` around ${delta.timeText}` : ' tomorrow evening';
         return `What specific time${timeRef} works best for you?`;
       }
       if (target === 'location' || action.payload?.uncertainty?.field === 'location') {
-        return "Could you please clarify your exact pickup or drop-off location and landmark?";
+        return "Could you please clarify your pickup or drop-off location?";
       }
       if (target === 'audio') {
         return "Sorry, I couldn't quite make that out. Could you say that again?";

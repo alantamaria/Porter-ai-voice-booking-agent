@@ -523,6 +523,35 @@ export function applyStateDelta(
     next.logistics.helpersRequired = helperCalc.helpersNeeded;
   }
 
+  // Synchronize Ambiguities & Uncertainty Flags
+  if (delta.ambiguities && delta.ambiguities.length > 0) {
+    next.metadata.uncertainties = [...delta.ambiguities];
+    next.metadata.detectedAmbiguitiesInLastTurn = delta.ambiguities.map(a => a.clarificationPrompt || a.field);
+  } else if (delta.isDateAmbiguous) {
+    next.metadata.detectedAmbiguitiesInLastTurn.push('Multiple dates or ambiguous moving date');
+  } else if (delta.isTimeAmbiguous) {
+    next.metadata.detectedAmbiguitiesInLastTurn.push('Ambiguous time slot');
+  } else if (delta.isInventoryAmbiguous || delta.isVagueInventory) {
+    next.metadata.detectedAmbiguitiesInLastTurn.push('Vague inventory description');
+  } else {
+    // If user provided a clean, unambiguous detail, clear prior uncertainty for that field
+    if (schedDate && !delta.isDateAmbiguous) {
+      next.metadata.uncertainties = (next.metadata.uncertainties || []).filter(u => u.field !== 'date' && u.field !== 'schedule');
+    }
+    if (schedTime && !delta.isTimeAmbiguous) {
+      next.metadata.uncertainties = (next.metadata.uncertainties || []).filter(u => u.field !== 'time');
+    }
+    if (pickupLoc) {
+      next.metadata.uncertainties = (next.metadata.uncertainties || []).filter(u => u.field !== 'pickup' && u.field !== 'location');
+    }
+    if (dropoffLoc) {
+      next.metadata.uncertainties = (next.metadata.uncertainties || []).filter(u => u.field !== 'dropoff' && u.field !== 'location');
+    }
+    if (itemsToAdd && itemsToAdd.length > 0 && !delta.isInventoryAmbiguous && !delta.isVagueInventory) {
+      next.metadata.uncertainties = (next.metadata.uncertainties || []).filter(u => u.field !== 'inventory');
+    }
+  }
+
   // 11. Recalculate Missing Fields & Completeness Check
   const missing = getMissingMandatoryFields(next);
   next.metadata.missingMandatoryFields = missing;
@@ -531,10 +560,23 @@ export function applyStateDelta(
   next.metadata.completionScore = score;
 
   // 12. Deterministic Phase Transitions (Section 2 & Step 4)
+  const utteranceLower = (userUtterance || '').toLowerCase();
+  const utteranceHasConfirm =
+    /\b(confirm|confirmed|confirming|confirmation)\b/i.test(utteranceLower) ||
+    /confirmed\s+a\s+year/i.test(utteranceLower) ||
+    /confirm\s+(it\s+)?(yeah|yes|yep|here)/i.test(utteranceLower) ||
+    ((currentState.phase === 'REQUIREMENTS_REVIEW' || complete) &&
+      /^(yes|yeah|yep|yup|sure|ok|okay|alright|correct|right|that's\s+correct|looks\s+good|go\s+ahead|proceed|done|perfect|fine|yes\s+please)\b/i.test(utteranceLower.trim()));
+
+  const isConfirmationIntent =
+    delta.userIntent === 'CONFIRMING' ||
+    delta.userIntent === 'CONFIRMATION' ||
+    utteranceHasConfirm;
+
   if (delta.userIntent === 'CANCELLATION') {
     next.confirmationStatus = 'CANCELLED';
   } else if (
-    (delta.userIntent === 'CONFIRMING' || delta.userIntent === 'CONFIRMATION') &&
+    isConfirmationIntent &&
     (currentState.phase === 'REQUIREMENTS_REVIEW' || complete)
   ) {
     next.phase = 'BOOKING_CONFIRMED';

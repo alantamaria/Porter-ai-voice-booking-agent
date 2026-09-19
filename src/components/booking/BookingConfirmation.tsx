@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { BookingState } from '@/types/booking';
-import { CheckCircle2, RotateCcw, MapPin, Calendar, Box, Truck, Download } from 'lucide-react';
+import { CheckCircle2, RotateCcw, MapPin, Calendar, Box } from 'lucide-react';
 
 interface BookingConfirmationProps {
   state: BookingState;
@@ -10,17 +10,7 @@ interface BookingConfirmationProps {
 }
 
 export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({ state, onReset }) => {
-  const { pickup, dropoff, schedule, inventory, logistics } = state;
-
-  const handleExportJson = () => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(state, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `porter-booking-requirements-${state.sessionId}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-  };
+  const { pickup, dropoff, schedule, inventory } = state;
 
   return (
     <div className="booking-confirmation-card" role="region" aria-label="Booking confirmed details">
@@ -73,16 +63,6 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({ state,
                 : 'Household goods'}
             </span>
           </div>
-
-          {/* Fleet Recommendation */}
-          <div className="confirmed-item-row">
-            <span className="confirmed-item-key">
-              <Truck className="icon-xxs text-primary" aria-hidden="true" /> Fleet & Helpers
-            </span>
-            <span className="confirmed-item-val">
-              {logistics.vehicleDisplayName} ({logistics.helpersRequired} Assistant{logistics.helpersRequired === 1 ? '' : 's'})
-            </span>
-          </div>
         </div>
       </div>
 
@@ -95,17 +75,6 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({ state,
         >
           <RotateCcw className="icon-xs" aria-hidden="true" />
           <span>Start a new booking</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={handleExportJson}
-          className="btn-export-json"
-          aria-label="Download requirements JSON"
-          title="Download verified requirements JSON"
-        >
-          <Download className="icon-xs" aria-hidden="true" />
-          <span>Export requirements JSON</span>
         </button>
       </div>
     </div>

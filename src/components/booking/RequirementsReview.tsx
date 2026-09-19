@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { BookingState } from '@/types/booking';
-import { CheckCircle2, Edit3, MapPin, Calendar, Clock, Box, Truck, Users } from 'lucide-react';
+import { CheckCircle2, Edit3, MapPin, Calendar, Clock, Box } from 'lucide-react';
 
 interface RequirementsReviewProps {
   state: BookingState;
@@ -15,7 +15,7 @@ export const RequirementsReview: React.FC<RequirementsReviewProps> = ({
   onConfirm,
   onCorrection,
 }) => {
-  const { pickup, dropoff, schedule, inventory, logistics } = state;
+  const { pickup, dropoff, schedule, inventory } = state;
 
   return (
     <div className="requirements-review-card" role="region" aria-label="Review your booking requirements">
@@ -30,42 +30,37 @@ export const RequirementsReview: React.FC<RequirementsReviewProps> = ({
         </p>
       </div>
 
-      <div className="review-details-grid">
-        {/* Route */}
+      <div className="review-items-grid">
+        {/* Pickup */}
         <div className="review-item">
           <span className="review-item-label">
             <MapPin className="icon-xxs text-primary" aria-hidden="true" /> Pickup
           </span>
-          <span className="review-item-value">
-            {pickup.normalizedLocation || 'Not provided'}
-            {pickup.floor !== undefined && pickup.floor !== null && (
-              <span className="review-item-sub">
-                {' '}(Floor {pickup.floor === 0 ? 'Ground' : pickup.floor}, {pickup.hasElevator ? 'Elevator' : 'No Lift'})
-              </span>
-            )}
+          <span className="review-item-value">{pickup.normalizedLocation || 'Not specified'}</span>
+          <span className="review-item-sub">
+            Floor: {pickup.floor === 0 ? 'Ground' : pickup.floor ?? 'Ground'} &bull; Lift:{' '}
+            {pickup.hasElevator === null ? 'Not specified' : pickup.hasElevator ? 'Yes' : 'No Lift'}
           </span>
         </div>
 
+        {/* Drop-off */}
         <div className="review-item">
           <span className="review-item-label">
             <MapPin className="icon-xxs text-primary" aria-hidden="true" /> Drop-off
           </span>
-          <span className="review-item-value">
-            {dropoff.normalizedLocation || 'Not provided'}
-            {dropoff.floor !== undefined && dropoff.floor !== null && (
-              <span className="review-item-sub">
-                {' '}(Floor {dropoff.floor === 0 ? 'Ground' : dropoff.floor}, {dropoff.hasElevator ? 'Elevator' : 'No Lift'})
-              </span>
-            )}
+          <span className="review-item-value">{dropoff.normalizedLocation || 'Not specified'}</span>
+          <span className="review-item-sub">
+            Floor: {dropoff.floor === 0 ? 'Ground' : dropoff.floor ?? 'Ground'} &bull; Lift:{' '}
+            {dropoff.hasElevator === null ? 'Not specified' : dropoff.hasElevator ? 'Yes' : 'No Lift'}
           </span>
         </div>
 
-        {/* Schedule */}
+        {/* Date & Time */}
         <div className="review-item">
           <span className="review-item-label">
             <Calendar className="icon-xxs text-primary" aria-hidden="true" /> Date
           </span>
-          <span className="review-item-value">{schedule.parsedDate || 'Not selected'}</span>
+          <span className="review-item-value">{schedule.parsedDate || 'Not specified'}</span>
         </div>
 
         <div className="review-item">
@@ -84,23 +79,6 @@ export const RequirementsReview: React.FC<RequirementsReviewProps> = ({
             {inventory.items.length > 0
               ? inventory.items.map((i) => `${i.quantity}x ${i.name}`).join(', ')
               : 'Standard household items'}
-          </span>
-        </div>
-
-        {/* Logistics */}
-        <div className="review-item">
-          <span className="review-item-label">
-            <Truck className="icon-xxs text-primary" aria-hidden="true" /> Recommended Fleet
-          </span>
-          <span className="review-item-value">{logistics.vehicleDisplayName}</span>
-        </div>
-
-        <div className="review-item">
-          <span className="review-item-label">
-            <Users className="icon-xxs text-primary" aria-hidden="true" /> Helpers
-          </span>
-          <span className="review-item-value">
-            {logistics.helpersRequired} Driver Assistant{logistics.helpersRequired === 1 ? '' : 's'}
           </span>
         </div>
       </div>
