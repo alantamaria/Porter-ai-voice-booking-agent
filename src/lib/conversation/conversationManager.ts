@@ -829,8 +829,33 @@ export async function processUserTurn(
   }
 
   // 7. STEP 2: Apply StateDelta via Deterministic Reducer
-  const turnIndex = (currentState.metadata.turnCount || 0) + 1;
-  const updatedState = applyStateDelta(currentState, validDelta, {
+  // If the previous booking was confirmed (or in review with complete requirements), and the user
+  // initiates a new booking (e.g. "Hello, I need to move a sofa from Kakkanad to Kochi"),
+  // start fresh with a clean initial state rather than accumulating on top of the old booking's ghost date/time.
+  const isAlreadyConfirmed =
+    currentState.phase === 'BOOKING_CONFIRMED' || currentState.confirmationStatus === 'CONFIRMED';
+  const isStartingNewBooking =
+    validDelta.userIntent !== 'CONFIRMATION' &&
+    validDelta.userIntent !== 'CORRECTION' &&
+    (
+      (isAlreadyConfirmed &&
+        (validDelta.userIntent === 'BOOKING' ||
+          validDelta.pickupLocation !== undefined ||
+          validDelta.dropoffLocation !== undefined ||
+          Boolean(validDelta.itemsToAdd && validDelta.itemsToAdd.length > 0) ||
+          validDelta.scheduleDate !== undefined ||
+          validDelta.scheduleTime !== undefined)) ||
+      (currentState.phase === 'REQUIREMENTS_REVIEW' &&
+        validDelta.userIntent === 'BOOKING' &&
+        Boolean(validDelta.pickupLocation || validDelta.dropoffLocation || (validDelta.itemsToAdd && validDelta.itemsToAdd.length > 0)))
+    );
+
+  const baseState = isStartingNewBooking
+    ? createInitialBookingState(sessionId)
+    : currentState;
+
+  const turnIndex = (baseState.metadata.turnCount || 0) + 1;
+  const updatedState = applyStateDelta(baseState, validDelta, {
     userUtterance: utterance,
     turnIndex
   });

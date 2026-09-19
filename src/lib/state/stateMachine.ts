@@ -581,6 +581,10 @@ export function applyStateDelta(
   ) {
     next.phase = 'BOOKING_CONFIRMED';
     next.confirmationStatus = 'CONFIRMED';
+  } else if (currentState.phase === 'BOOKING_CONFIRMED' || currentState.confirmationStatus === 'CONFIRMED') {
+    // Preserve confirmed status on conversational turns; do not regress back to review
+    next.phase = 'BOOKING_CONFIRMED';
+    next.confirmationStatus = 'CONFIRMED';
   } else if (complete) {
     // Only enter REQUIREMENTS_REVIEW when all mandatory requirements are strictly complete and valid!
     next.phase = 'REQUIREMENTS_REVIEW';

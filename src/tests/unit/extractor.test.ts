@@ -469,4 +469,36 @@ describe('STEP 3: LLM Structured Extractor Unit Tests', () => {
     const letMeThink = parseLocalDelta('let me think');
     assert.equal(letMeThink.userIntent, 'GREETING');
   });
+
+  // Test 27: Time extraction with p.m. / a.m. periods, 24h format, and o'clock
+  it('27. Local extractor correctly parses time formats with dots, military, and oclock', () => {
+    const dotPm = parseLocalDelta('2:00 p.m.');
+    assert.equal(dotPm.scheduleTime, '2:00 PM');
+    assert.equal(dotPm.isTimeAmbiguous, false);
+
+    const dotAm = parseLocalDelta('9:30 a.m.');
+    assert.equal(dotAm.scheduleTime, '9:30 AM');
+    assert.equal(dotAm.isTimeAmbiguous, false);
+
+    const simplePm = parseLocalDelta('2 p.m.');
+    assert.equal(simplePm.scheduleTime, '2 PM');
+
+    const military = parseLocalDelta('Schedule for 14:00');
+    assert.equal(military.scheduleTime, '2:00 PM');
+
+    const oclock = parseLocalDelta('2 o\'clock in the afternoon');
+    assert.equal(oclock.scheduleTime, '2:00 PM');
+  });
+
+  // Test 28: Complex utterance with Kochi / Kakkanad locations and dotted time
+  it('28. Extracts sofa move from kakkana to Cochin by tomorrow 2:00 p.m.', () => {
+    const delta = parseLocalDelta('I need to move a sofa from kakkana to Cochin by tomorrow 2:00 p.m.');
+    assert.equal(delta.pickupLocation, 'Kakkanad');
+    assert.equal(delta.dropoffLocation, 'Kochi');
+    assert.equal(delta.scheduleDate, 'tomorrow');
+    assert.equal(delta.scheduleTime, '2:00 PM');
+    assert.equal(delta.isTimeAmbiguous, false);
+    assert.equal(delta.itemsToAdd?.length, 1);
+    assert.equal(delta.itemsToAdd?.[0].name, 'sofa');
+  });
 });

@@ -50,7 +50,8 @@ export function parseLocalDelta(userUtterance: string, currentState?: BookingSta
     currentState?.phase === 'REQUIREMENTS_REVIEW' ||
     (currentState?.metadata?.missingMandatoryFields &&
       currentState.metadata.missingMandatoryFields.length === 0 &&
-      currentState.phase !== 'GREETING');
+      currentState.phase !== 'GREETING' &&
+      currentState.phase !== 'BOOKING_CONFIRMED');
 
   const isAffirmativePhrase =
     /^(yes|yeah|yep|yup|sure|ok|okay|alright|correct|right|fine|perfect|done|yes\s+please|please\s+do|book\s+it)[.!,\s]*$/i.test(lower) ||
@@ -200,8 +201,19 @@ export function parseLocalDelta(userUtterance: string, currentState?: BookingSta
     return delta;
   }
 
-  // 4. Restart
-  if (lower.includes('restart') || lower.includes('start over') || lower.includes('new booking')) {
+  // 4. Restart / Start a new booking
+  const isRestartKeyword =
+    lower.includes('restart') ||
+    lower.includes('start over') ||
+    lower.includes('new booking') ||
+    lower.includes('start a new booking') ||
+    lower.includes('start new booking') ||
+    lower.includes('another booking') ||
+    lower.includes('book another') ||
+    lower.includes('book another move') ||
+    lower.includes('new move');
+
+  if (isRestartKeyword) {
     delta.isRestart = true;
     delta.userIntent = 'RESTART';
     return delta;
@@ -306,37 +318,38 @@ export function parseLocalDelta(userUtterance: string, currentState?: BookingSta
   // Support both "pick-up", "pickup" and "pick up" (with space)
   if (!delta.pickupLocation && !delta.dropoffLocation) {
     const fromToMatch = cleanedText.match(
-      /(?:from|pick-?up(?:\s+is)?|pick\s+up(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)\s+(?:to|drop-?off(?:\s+is)?|drop\s+off(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:tomorrow|today|evening|morning|on|at)|$)/i
+      /(?:from|pick-?up(?:\s+is)?|pick\s+up(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)\s+(?:to|drop-?off(?:\s+is)?|drop\s+off(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:by|on|at|around|for|this|next|tomorrow|today|yesterday|evening|morning|afternoon|night|\d{1,2})|$)/i
     );
     if (fromToMatch) {
-      const rawPickup = fromToMatch[1].trim();
+      let rawPickup = fromToMatch[1].trim().replace(/\s+(by|on|at|around|for|this|next)$/i, '').trim();
+      let rawDropoff = fromToMatch[2].trim().replace(/\s+(by|on|at|around|for|this|next)$/i, '').trim();
       if (!rawPickup.toLowerCase().includes('somewhere near') && !rawPickup.toLowerCase().includes('near about')) {
         delta.pickupLocation = normalizeLocation(rawPickup);
       }
-      delta.dropoffLocation = normalizeLocation(fromToMatch[2].trim());
+      delta.dropoffLocation = normalizeLocation(rawDropoff);
     } else {
       // Check explicit drop-off phrase
       // Standalone 'to' must NOT be followed by a verb (book, move, send, etc.) to avoid
       // misinterpreting intent phrases like "I want to book" as a drop-off location.
       const toMatch = cleanedText.match(
-        /(?:drop-?off(?:\s+is)?|drop\s+off(?:\s+is)?|destination(?:\s+is)?|to)\s+(?:also\s+)?([a-zA-Z0-9\s]+?)(?:\s+(?:from|tomorrow|today)|$)/i
+        /(?:drop-?off(?:\s+is)?|drop\s+off(?:\s+is)?|destination(?:\s+is)?|to)\s+(?:also\s+)?([a-zA-Z0-9\s]+?)(?:\s+(?:by|on|at|around|for|this|next|from|tomorrow|today|yesterday|evening|morning)|$)/i
       );
       if (toMatch) {
-        const captured = toMatch[1].trim().toLowerCase();
+        let captured = toMatch[1].trim().replace(/\s+(by|on|at|around|for|this|next)$/i, '').trim();
         // Reject if the captured text starts with a verb (intent phrase, not a location)
         const verbPrefixes = /^(book|move|send|shift|deliver|schedule|hire|transport|pick|get|arrange|find|need|want|have)\b/i;
         if (!verbPrefixes.test(captured)) {
-          delta.dropoffLocation = normalizeLocation(toMatch[1].trim());
+          delta.dropoffLocation = normalizeLocation(captured);
         }
       }
 
       // Check explicit pickup phrase
       // Handle patterns: "from X", "pickup is X", "pickup is from X", "pick up X"
       const fromMatch = cleanedText.match(
-        /(?:from|pick-?up(?:\s+is(?:\s+from)?)?|pick\s+up(?:\s+is(?:\s+from)?)?)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:to|tomorrow|today)|$)/i
+        /(?:from|pick-?up(?:\s+is(?:\s+from)?)?|pick\s+up(?:\s+is(?:\s+from)?)?)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:by|on|at|around|for|this|next|to|tomorrow|today|yesterday|evening|morning)|$)/i
       );
       if (fromMatch) {
-        let rawPickup = fromMatch[1].trim();
+        let rawPickup = fromMatch[1].trim().replace(/\s+(by|on|at|around|for|this|next)$/i, '').trim();
         // Strip accidental leading 'from ' if present
         rawPickup = rawPickup.replace(/^from\s+/i, '');
         if (!rawPickup.toLowerCase().includes('somewhere near') && !rawPickup.toLowerCase().includes('near about')) {
@@ -526,16 +539,57 @@ export function parseLocalDelta(userUtterance: string, currentState?: BookingSta
   }
 
   // 9. Time & Ambiguity
-  if (lower.includes('evening') || lower.includes('morning') || lower.includes('afternoon') || lower.includes('night')) {
-    if (!text.match(/\d{1,2}(?::\d{2})?\s*(?:am|pm)/i)) {
-      delta.isTimeAmbiguous = true;
-      delta.userIntent = 'CLARIFICATION';
-    }
-  }
-  const timeMatch = text.match(/(\d{1,2}(?::\d{2})?\s*(?:am|pm))/i);
-  if (timeMatch) {
-    delta.scheduleTime = timeMatch[1].toUpperCase();
+  // 9a. Standard 12-hour AM/PM formats: "2:00 PM", "2:00 p.m.", "2.00 pm", "2 pm", "2p.m.", "10:30 am", "10:30 a.m."
+  const ampmTimeRegex = /\b(\d{1,2}(?:[:.]\d{2})?)\s*([ap]\.?m\.?)(?!\w)/i;
+  const ampmMatch = text.match(ampmTimeRegex);
+
+  // 9b. 24-hour military time: "14:00", "09:30"
+  const militaryTimeRegex = /\b([01]?\d|2[0-3]):([0-5]\d)\b/;
+  const militaryMatch = text.match(militaryTimeRegex);
+
+  // 9c. O'clock formats: "2 o'clock", "2 o'clock in the afternoon", "10 o clock"
+  const oclockRegex = /\b(\d{1,2})\s*o'?clock(?:\s*(?:in\s+the\s+)?(morning|afternoon|evening|night))?\b/i;
+  const oclockMatch = text.match(oclockRegex);
+
+  // 9d. Standalone time utterance or contextual answer to time question:
+  // e.g. "at 2:00", "around 2", "by 2", "2:00", "2", "at 4 in the evening"
+  const isTimePromptContext =
+    currentState?.metadata?.missingMandatoryFields?.includes('time') ||
+    Boolean(currentState?.schedule?.parsedDate && !currentState?.schedule?.parsedTimeSlot);
+  const standaloneTimeRegex = /^(?:at|around|by)?\s*(\d{1,2})(?:[:.](\d{2}))?\s*(?:in\s+the\s+)?(morning|afternoon|evening|night)?[.!\s]*$/i;
+  const standaloneMatch = (isTimePromptContext || /^(?:at|around|by)\s+\d/i.test(text)) ? text.match(standaloneTimeRegex) : null;
+
+  if (ampmMatch) {
+    const digits = ampmMatch[1].replace('.', ':');
+    const meridiem = ampmMatch[2].replace(/\./g, '').toUpperCase();
+    delta.scheduleTime = `${digits} ${meridiem}`;
     delta.isTimeAmbiguous = false;
+  } else if (militaryMatch) {
+    let hour = parseInt(militaryMatch[1], 10);
+    const mins = militaryMatch[2];
+    const meridiem = hour >= 12 ? 'PM' : 'AM';
+    if (hour > 12) hour -= 12;
+    if (hour === 0) hour = 12;
+    delta.scheduleTime = `${hour}:${mins} ${meridiem}`;
+    delta.isTimeAmbiguous = false;
+  } else if (oclockMatch) {
+    const hour = parseInt(oclockMatch[1], 10);
+    const tod = (oclockMatch[2] || '').toLowerCase();
+    const isPM = tod === 'afternoon' || tod === 'evening' || tod === 'night' || (tod === '' && hour <= 7);
+    delta.scheduleTime = `${hour}:00 ${isPM ? 'PM' : 'AM'}`;
+    delta.isTimeAmbiguous = false;
+  } else if (standaloneMatch) {
+    const hour = parseInt(standaloneMatch[1], 10);
+    if (hour >= 1 && hour <= 12) {
+      const mins = standaloneMatch[2] || '00';
+      const tod = (standaloneMatch[3] || '').toLowerCase();
+      const isPM = tod === 'afternoon' || tod === 'evening' || tod === 'night' || (tod === '' && hour <= 7);
+      delta.scheduleTime = `${hour}:${mins} ${isPM ? 'PM' : 'AM'}`;
+      delta.isTimeAmbiguous = false;
+    }
+  } else if (lower.includes('evening') || lower.includes('morning') || lower.includes('afternoon') || lower.includes('night')) {
+    delta.isTimeAmbiguous = true;
+    delta.userIntent = 'CLARIFICATION';
   }
 
   // 10. Inventory

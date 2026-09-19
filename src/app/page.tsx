@@ -167,6 +167,8 @@ export default function Home() {
             isAgentSpeaking={isAgentSpeaking}
             onStartSpeaking={handleToggleMic}
             onSelectPrompt={handleSendMessage}
+            isConfirmed={bookingState.phase === 'BOOKING_CONFIRMED'}
+            onResetBooking={handleResetConversation}
           />
 
           <VoiceControl

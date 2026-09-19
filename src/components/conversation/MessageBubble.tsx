@@ -2,20 +2,25 @@
 
 import React from 'react';
 import { MessageTurn } from '@/types/booking';
-import { User, Bot, Volume2 } from 'lucide-react';
+import { User, Bot, Volume2, RotateCcw } from 'lucide-react';
 
 interface MessageBubbleProps {
   turn: MessageTurn;
   isLatestAgent?: boolean;
   isSpeaking?: boolean;
+  isConfirmed?: boolean;
+  onNewBooking?: () => void;
 }
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({
   turn,
   isLatestAgent = false,
   isSpeaking = false,
+  isConfirmed = false,
+  onNewBooking,
 }) => {
   const isUser = turn.role === 'user';
+  const showNewBooking = !isUser && isLatestAgent && isConfirmed && Boolean(onNewBooking);
 
   return (
     <div
@@ -50,6 +55,20 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
         <div className={`chat-bubble ${isUser ? 'user-bubble' : 'agent-bubble'}`}>
           <p className="bubble-text">{turn.text}</p>
+          {showNewBooking && (
+            <div className="assistant-bubble-actions">
+              <button
+                type="button"
+                onClick={onNewBooking}
+                className="btn-assistant-new-booking"
+                id="btn-assistant-new-booking"
+                aria-label="Start a new booking session"
+              >
+                <RotateCcw className="icon-xs" aria-hidden="true" />
+                <span>Start a new booking</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

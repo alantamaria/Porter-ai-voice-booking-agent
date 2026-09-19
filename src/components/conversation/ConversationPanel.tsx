@@ -3,7 +3,7 @@
 import React, { useEffect, useRef } from 'react';
 import { MessageTurn } from '@/types/booking';
 import { MessageBubble } from './MessageBubble';
-import { Mic, Sparkles, MessageSquare } from 'lucide-react';
+import { Mic, Sparkles, MessageSquare, RotateCcw, CheckCircle2 } from 'lucide-react';
 
 interface ConversationPanelProps {
   history: MessageTurn[];
@@ -12,6 +12,8 @@ interface ConversationPanelProps {
   isAgentSpeaking: boolean;
   onStartSpeaking: () => void;
   onSelectPrompt?: (text: string) => void;
+  isConfirmed?: boolean;
+  onResetBooking?: () => void;
 }
 
 const SAMPLE_PROMPTS = [
@@ -27,6 +29,8 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
   isAgentSpeaking,
   onStartSpeaking,
   onSelectPrompt,
+  isConfirmed = false,
+  onResetBooking,
 }) => {
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -116,8 +120,35 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
                 turn={turn}
                 isLatestAgent={index === latestAgentIndex}
                 isSpeaking={isAgentSpeaking && index === latestAgentIndex}
+                isConfirmed={isConfirmed}
+                onNewBooking={onResetBooking}
               />
             ))}
+
+            {/* Assistant-side Option to Start a New Booking when Confirmed */}
+            {isConfirmed && onResetBooking && (
+              <div className="assistant-confirmed-action-card animate-fade-in" role="region" aria-label="Start a new booking">
+                <div className="assistant-action-card-info">
+                  <div className="assistant-action-badge">
+                    <CheckCircle2 className="icon-xs text-emerald-400" aria-hidden="true" />
+                    <span>Move Confirmed</span>
+                  </div>
+                  <p className="assistant-action-text">
+                    Ready for another move? You can start a new booking anytime.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onResetBooking}
+                  className="btn-assistant-new-booking"
+                  id="btn-assistant-start-new-booking"
+                  aria-label="Start a new booking session"
+                >
+                  <RotateCcw className="icon-xs" aria-hidden="true" />
+                  <span>Start a new booking</span>
+                </button>
+              </div>
+            )}
 
             {/* Interim Transcript preview while user is actively speaking */}
             {interimTranscript && (

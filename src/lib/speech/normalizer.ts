@@ -79,6 +79,9 @@ const LOCALITY_PHONETIC_MAP: Record<string, string> = {
   // Kochi Hubs (Evaluator Flow)
   'kakkanad': 'Kakkanad',
   'kakkad': 'Kakkanad',
+  'kakkana': 'Kakkanad',
+  'cochin': 'Kochi',
+  'kochi': 'Kochi',
   'vyttila': 'Vyttila',
   'vytilla': 'Vyttila',
   'edappally': 'Edappally',

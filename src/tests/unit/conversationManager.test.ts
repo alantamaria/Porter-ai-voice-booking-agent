@@ -941,6 +941,110 @@ describe('STEP 4: Conversation Manager & Next-Action Determinism', () => {
     assert.match(res.responseText, /You're welcome!/i);
     assert.match(res.responseText, /drop-off destination/i);
   });
+
+  // 52. Captures full move from kakkana to Cochin with dotted time 2:00 p.m.
+  it('52. Captures full move from kakkana to Cochin by tomorrow 2:00 p.m.', async () => {
+    const state = createInitialBookingState('test-sofa-move');
+    const utterance = 'I need to move a sofa from kakkana to Cochin by tomorrow 2:00 p.m.';
+    const delta = parseLocalDelta(utterance, state);
+    const res = await processUserTurn(
+      { userUtterance: utterance, currentState: state },
+      createMockClient(delta)
+    );
+
+    assert.equal(res.updatedState.pickup.normalizedLocation, 'Kakkanad');
+    assert.equal(res.updatedState.dropoff.normalizedLocation, 'Kochi');
+    assert.equal(res.updatedState.inventory.items[0]?.name, 'sofa');
+    assert.equal(res.updatedState.schedule.parsedTimeSlot, '2:00 PM');
+    assert.ok(res.updatedState.schedule.parsedDate);
+    assert.notEqual(res.action.type, 'HANDLE_GREETING');
+    assert.ok(!res.responseText.includes('How can I help you today?'));
+  });
+
+  // 53. Answering time question with "2:00 p.m." captures time and does not reset to greeting
+  it('53. Answering time question with "2:00 p.m." captures time and does not trigger greeting', async () => {
+    const state = createInitialBookingState('test-time-answer');
+    state.pickup.normalizedLocation = 'Kakkanad';
+    state.pickup.verified = true;
+    state.dropoff.normalizedLocation = 'Kochi';
+    state.dropoff.verified = true;
+    state.inventory.items = [{
+      id: '1',
+      name: 'sofa',
+      category: 'FURNITURE',
+      quantity: 1,
+      size: 'LARGE',
+      isHazardous: false,
+      approxVolumeCuFt: 35,
+      approxWeightKg: 50
+    }];
+    state.schedule.parsedDate = '2026-09-20';
+    state.schedule.isValid = true;
+    state.metadata.missingMandatoryFields = ['time'];
+
+    const utterance = '2:00 p.m.';
+    const delta = parseLocalDelta(utterance, state);
+    assert.equal(delta.scheduleTime, '2:00 PM');
+
+    const res = await processUserTurn(
+      { userUtterance: utterance, currentState: state },
+      createMockClient(delta)
+    );
+
+    assert.equal(res.updatedState.schedule.parsedTimeSlot, '2:00 PM');
+    assert.notEqual(res.action.type, 'HANDLE_GREETING');
+    assert.ok(!res.responseText.includes('How can I help you today?'));
+  });
+
+  // 54. Initiating a new move after confirmed booking starts a fresh booking session
+  it('54. Initiating a new move after confirmed booking starts a fresh booking session', async () => {
+    const state = createInitialBookingState('test-confirmed-reset');
+    state.phase = 'BOOKING_CONFIRMED';
+    state.confirmationStatus = 'CONFIRMED';
+    state.pickup.normalizedLocation = 'Indiranagar';
+    state.dropoff.normalizedLocation = 'Whitefield';
+    state.schedule.parsedDate = '2026-09-20';
+    state.schedule.parsedTimeSlot = '10:00 AM';
+
+    const utterance = 'Hello, I need to move a sofa from Kakkanad to Kochi.';
+    const delta = parseLocalDelta(utterance, state);
+    assert.equal(delta.pickupLocation, 'Kakkanad');
+    assert.equal(delta.dropoffLocation, 'Kochi');
+    assert.equal(delta.itemsToAdd?.[0].name, 'sofa');
+
+    const res = await processUserTurn(
+      { userUtterance: utterance, currentState: state },
+      createMockClient(delta)
+    );
+
+    // Should NOT repeat the confirmed message
+    assert.notEqual(res.action.type, 'CONFIRM_BOOKING');
+    assert.ok(!res.responseText.includes('move details are confirmed'));
+    assert.equal(res.updatedState.pickup.normalizedLocation, 'Kakkanad');
+    assert.equal(res.updatedState.dropoff.normalizedLocation, 'Kochi');
+    assert.equal(res.updatedState.phase, 'GATHERING_DETAILS');
+    assert.match(res.responseText, /date/i);
+  });
+
+  // 55. Explicit "Start a new booking" triggers restart after confirmed booking
+  it('55. Explicit "Start a new booking" triggers restart after confirmed booking', async () => {
+    const state = createInitialBookingState('test-explicit-new-booking');
+    state.phase = 'BOOKING_CONFIRMED';
+    state.confirmationStatus = 'CONFIRMED';
+
+    const utterance = 'Start a new booking';
+    const delta = parseLocalDelta(utterance, state);
+    assert.equal(delta.userIntent, 'RESTART');
+
+    const res = await processUserTurn(
+      { userUtterance: utterance, currentState: state },
+      createMockClient(delta)
+    );
+
+    assert.equal(res.action.type, 'HANDLE_RESTART');
+    assert.match(res.responseText, /start fresh/i);
+    assert.equal(res.updatedState.phase, 'GREETING');
+  });
 });
 
 

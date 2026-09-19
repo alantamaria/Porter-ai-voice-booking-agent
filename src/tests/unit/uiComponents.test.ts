@@ -367,4 +367,27 @@ describe('STEP 6: Evaluator-Facing UI Components Test Suite', () => {
     assert.ok(!html.includes('ZodError'));
     assert.ok(!html.includes('INTERNAL_'));
   });
+
+  // 13. Assistant side displays "Start a new booking" option when confirmed
+  it('13. ConversationPanel renders "Start a new booking" option at assistant side when confirmed', () => {
+    const confirmedTurn: MessageTurn = {
+      id: 'turn-confirmed',
+      role: 'agent',
+      text: 'Perfect. Your move details are confirmed! Thank you for choosing Porter.',
+      timestamp: '10:05 AM',
+    };
+    const html = renderToString(
+      React.createElement(ConversationPanel, {
+        history: [confirmedTurn],
+        interimTranscript: '',
+        isListening: false,
+        isAgentSpeaking: false,
+        onStartSpeaking: () => {},
+        isConfirmed: true,
+        onResetBooking: () => {},
+      })
+    );
+    assert.ok(html.includes('Start a new booking'));
+    assert.ok(html.includes('btn-assistant-new-booking'));
+  });
 });
