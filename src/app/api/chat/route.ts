@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
     let customClient: LLMClient | undefined;
     if (!process.env.GROQ_API_KEY && !process.env.OPENAI_API_KEY) {
       customClient = new LLMClient(new MockLLMProvider(() => {
-        const delta = parseLocalDelta(message);
+        const delta = parseLocalDelta(message, state);
         return JSON.stringify(delta);
       }));
     }

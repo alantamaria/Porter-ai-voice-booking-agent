@@ -684,4 +684,38 @@ describe('STEP 4: Conversation Manager & Next-Action Determinism', () => {
     assert.equal(res.action.type, 'ASK_FOR_MISSING_INFORMATION');
     assert.equal(res.responseText, 'Sure! Where should we pick the items up from, and where are they going?');
   });
+
+  // 41. Stale-greeting prevention: Answering date with "Monday" does NOT repeat greeting
+  it('41. Answering date with "Monday" updates date and does NOT repeat greeting', async () => {
+    let state = createInitialBookingState('test-monday-flow');
+
+    // Turn 1: Locations provided
+    const delta1 = parseLocalDelta('I need to move from Kakkanad to Kochi');
+    const t1 = await processUserTurn(
+      { userUtterance: 'I need to move from Kakkanad to Kochi', currentState: state },
+      createMockClient(delta1)
+    );
+    state = t1.updatedState;
+    assert.equal(state.pickup.normalizedLocation, 'Kakkanad');
+    assert.equal(state.dropoff.normalizedLocation, 'Kochi');
+    assert.equal(t1.action.type, 'ASK_FOR_MISSING_INFORMATION');
+    assert.equal(t1.responseText, 'What date are you planning for the move?');
+
+    // Turn 2: User says "Monday."
+    const delta2 = parseLocalDelta('Monday.');
+    const t2 = await processUserTurn(
+      { userUtterance: 'Monday.', currentState: state },
+      createMockClient(delta2)
+    );
+    state = t2.updatedState;
+
+    // Must NOT repeat greeting!
+    assert.notEqual(t2.action.type, 'HANDLE_GREETING');
+    assert.ok(!t2.responseText.toLowerCase().includes('porter moving assistant'));
+    assert.ok(!t2.responseText.toLowerCase().includes('doing well'));
+
+    // Date must be parsed and next field requested
+    assert.ok(state.schedule.parsedDate, 'Expected parsedDate to be populated');
+    assert.equal(t2.action.type, 'ASK_FOR_MISSING_INFORMATION');
+  });
 });

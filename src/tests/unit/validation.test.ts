@@ -70,6 +70,38 @@ describe('Validation & Domain Rules Unit Tests', () => {
     assert.equal(yesterday.isoDate, '2026-09-18');
   });
 
+  it('should correctly resolve weekdays to upcoming dates across calendar boundaries', () => {
+    // baseDate: Saturday, September 19, 2026
+    const baseDate = new Date('2026-09-19T10:00:00');
+
+    // Monday should resolve to September 21, 2026
+    const monday = validateBookingDate('Monday', baseDate);
+    assert.equal(monday.isValid, true);
+    assert.equal(monday.isPast, false);
+    assert.equal(monday.isoDate, '2026-09-21');
+
+    // on Monday
+    const onMonday = validateBookingDate('on Monday', baseDate);
+    assert.equal(onMonday.isValid, true);
+    assert.equal(onMonday.isoDate, '2026-09-21');
+
+    // Tuesday -> 2026-09-22
+    const tuesday = validateBookingDate('Tuesday', baseDate);
+    assert.equal(tuesday.isValid, true);
+    assert.equal(tuesday.isoDate, '2026-09-22');
+
+    // Sunday -> 2026-09-20 (tomorrow)
+    const sunday = validateBookingDate('Sunday', baseDate);
+    assert.equal(sunday.isValid, true);
+    assert.equal(sunday.isoDate, '2026-09-20');
+
+    // Weekday spanning month boundary:
+    // Friday September 25, 2026 -> next Thursday is October 1, 2026
+    const sep25Friday = new Date('2026-09-25T10:00:00');
+    const octThursday = validateBookingDate('Thursday', sep25Friday);
+    assert.equal(octThursday.isoDate, '2026-10-01');
+  });
+
   it('should correctly handle month and year boundaries in relative date arithmetic', () => {
     // Month boundary: End of September (30 days)
     const endOfSept = new Date('2026-09-30T10:00:00');

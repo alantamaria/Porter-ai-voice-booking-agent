@@ -136,42 +136,67 @@ export function validateBookingDate(
   } else if (lower.includes('today') || lower.includes('tonight')) {
     // today is valid (target is already baseDate calendar day)
   } else {
-    // Check explicit ISO format (YYYY-MM-DD)
-    const isoMatch = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (isoMatch) {
-      const year = parseInt(isoMatch[1], 10);
-      const month = parseInt(isoMatch[2], 10) - 1;
-      const day = parseInt(isoMatch[3], 10);
-      const parsedDate = new Date(year, month, day);
-      if (
-        parsedDate.getFullYear() !== year ||
-        parsedDate.getMonth() !== month ||
-        parsedDate.getDate() !== day
-      ) {
+    // Check weekdays (e.g., "Monday", "next Tuesday", "on Friday")
+    const weekdays: Record<string, number> = {
+      sunday: 0,
+      monday: 1,
+      tuesday: 2,
+      wednesday: 3,
+      thursday: 4,
+      friday: 5,
+      saturday: 6
+    };
+    const matchedWeekday = Object.keys(weekdays).find(day =>
+      new RegExp(`\\b${day}\\b`, 'i').test(lower)
+    );
+
+    if (matchedWeekday) {
+      const targetDayIndex = weekdays[matchedWeekday];
+      const currentDayIndex = baseDate.getDay();
+      let diff = (targetDayIndex - currentDayIndex + 7) % 7;
+      if (diff === 0 && (lower.includes('next') || lower.includes('upcoming'))) {
+        diff = 7;
+      }
+      target.setDate(target.getDate() + diff);
+    } else {
+      // Check explicit ISO format (YYYY-MM-DD)
+      const isoMatch = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (isoMatch) {
+        const year = parseInt(isoMatch[1], 10);
+        const month = parseInt(isoMatch[2], 10) - 1;
+        const day = parseInt(isoMatch[3], 10);
+        const parsedDate = new Date(year, month, day);
+        if (
+          parsedDate.getFullYear() !== year ||
+          parsedDate.getMonth() !== month ||
+          parsedDate.getDate() !== day
+        ) {
+          return { isValid: false, isPast: false, error: 'Invalid date format.' };
+        }
+        const isPast = parsedDate.getTime() < todayZero.getTime();
+        return {
+          isValid: !isPast,
+          isPast,
+          isoDate: dateStr.trim(),
+          error: isPast ? `Booking date (${dateStr.trim()}) cannot be in the past.` : undefined
+        };
+      }
+
+      const cleanedDate = dateStr.replace(/(\d+)(?:st|nd|rd|th)\b/gi, (m, d) => d).replace(/\.$/, '').trim();
+      const parsed = new Date(cleanedDate);
+      if (isNaN(parsed.getTime())) {
         return { isValid: false, isPast: false, error: 'Invalid date format.' };
       }
-      const isPast = parsedDate.getTime() < todayZero.getTime();
+      const parsedZero = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+      const iso = formatDateToISO(parsedZero);
+      const isPast = parsedZero.getTime() < todayZero.getTime();
       return {
         isValid: !isPast,
         isPast,
-        isoDate: dateStr.trim(),
-        error: isPast ? `Booking date (${dateStr.trim()}) cannot be in the past.` : undefined
+        isoDate: iso,
+        error: isPast ? `Booking date (${iso}) cannot be in the past.` : undefined
       };
     }
-
-    const parsed = new Date(dateStr);
-    if (isNaN(parsed.getTime())) {
-      return { isValid: false, isPast: false, error: 'Invalid date format.' };
-    }
-    const parsedZero = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
-    const iso = formatDateToISO(parsedZero);
-    const isPast = parsedZero.getTime() < todayZero.getTime();
-    return {
-      isValid: !isPast,
-      isPast,
-      isoDate: iso,
-      error: isPast ? `Booking date (${iso}) cannot be in the past.` : undefined
-    };
   }
 
   const iso = formatDateToISO(target);

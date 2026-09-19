@@ -536,4 +536,70 @@ describe('STEP 5: Voice Session Controller Unit Tests', () => {
     // Must NOT process the echoed text as a user turn
     assert.equal(turnCount, 0);
   });
+
+  // 25. Stale-response protection: Slower earlier request finishing after a newer request is discarded
+  it('25. Slower earlier request finishing after a newer request is discarded', async () => {
+    const stt = new MockSTTProvider();
+    const tts = new MockTTSProvider();
+
+    let resolveSlowGreeting: ((val: ConversationResult) => void) | null = null;
+    const slowGreetingPromise = new Promise<ConversationResult>(resolve => {
+      resolveSlowGreeting = resolve;
+    });
+
+    const controller = new VoiceSessionController({
+      sttProvider: stt,
+      ttsProvider: tts,
+      processTurnFn: async (input) => {
+        if (input.userUtterance.includes('Hi, hello')) {
+          // Request A is slow
+          return slowGreetingPromise;
+        } else {
+          // Request B is fast
+          return {
+            responseText: 'What date are you planning for the move?',
+            action: { type: 'ASK_FOR_MISSING_INFORMATION' },
+            updatedState: {
+              ...createInitialBookingState(),
+              pickup: { ...createInitialBookingState().pickup, normalizedLocation: 'Kakkanad' },
+              dropoff: { ...createInitialBookingState().dropoff, normalizedLocation: 'Kochi' }
+            },
+            shouldSpeak: true,
+            requiresUserInput: true,
+            bookingConfirmed: false
+          };
+        }
+      }
+    });
+
+    await controller.startListening();
+
+    // Turn 1 (Request A): User says "Hi, hello. How are you?"
+    stt.simulateTranscript('Hi, hello. How are you?', true);
+    await new Promise(r => setTimeout(r, 10));
+
+    // Turn 2 (Request B): User says "I need to move from Kakkanad to Kochi." before Request A finishes
+    stt.simulateTranscript('I need to move from Kakkanad to Kochi.', true);
+    await new Promise(r => setTimeout(r, 20));
+
+    // Request B has finished and set the assistant response
+    assert.equal(controller.getState().assistantResponse, 'What date are you planning for the move?');
+
+    // Request A now finishes late
+    resolveSlowGreeting!({
+      responseText: "Hi there! I'm doing well, thank you for asking. I'm your Porter moving assistant — whenever you're ready to book a move, just let me know!",
+      action: { type: 'HANDLE_GREETING' },
+      updatedState: createInitialBookingState(),
+      shouldSpeak: true,
+      requiresUserInput: true,
+      bookingConfirmed: false
+    });
+    await new Promise(r => setTimeout(r, 20));
+
+    // Stale Request A must NOT overwrite Request B!
+    assert.equal(controller.getState().assistantResponse, 'What date are you planning for the move?');
+    // TTS spoken text must be from Request B, NOT the delayed Request A greeting
+    assert.ok(tts.spokenTexts.includes('What date are you planning for the move?'));
+    assert.ok(!tts.spokenTexts.includes("Hi there! I'm doing well, thank you for asking. I'm your Porter moving assistant — whenever you're ready to book a move, just let me know!"));
+  });
 });

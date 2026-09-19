@@ -265,8 +265,19 @@ export class VoiceSessionController {
     this.lastProcessedTranscript = cleaned;
     this.isTurnProcessing = true;
 
+    // If assistant is currently speaking, cancel TTS immediately on new user speech
+    if (this.tts.isSpeaking() || this.state.isSpeaking) {
+      logVoice(`🔇 [TTS CANCEL] Turn #${this.state.currentTurnId} cancelled due to new input`);
+      this.tts.stop();
+      this.state.isSpeaking = false;
+    }
+
     // Section 17: Conversation Turn Locking (Prevents Race Conditions)
     const currentTurnId = ++this.state.currentTurnId;
+    logVoice(`\n🟢 [TURN START] Turn #${currentTurnId}`);
+    logVoice(`   ├─ [USER INPUT] "${cleaned}"`);
+    logVoice(`   └─ [STATE BEFORE] Phase=${this.bookingState.phase} | Pickup=${this.bookingState.pickup.normalizedLocation || 'none'} | Dropoff=${this.bookingState.dropoff.normalizedLocation || 'none'} | Date=${this.bookingState.schedule.parsedDate || 'none'}`);
+
     this.clearSilenceTimer();
 
     this.state.status = 'PROCESSING';
@@ -276,23 +287,25 @@ export class VoiceSessionController {
     await this.stt.stopListening();
 
     try {
-      logVoice(`💬 [VoiceController] Turn #${currentTurnId} processing: "${cleaned}"`);
+      logVoice(`🚀 [REQUEST START] Turn #${currentTurnId}`);
       const result = await this.processTurnFn({
         userUtterance: cleaned,
         currentState: this.bookingState,
         conversationHistory: this.history,
         sessionId: this.sessionId
       });
+      logVoice(`📥 [REQUEST COMPLETE] Turn #${currentTurnId}`);
 
       // Discard stale response if a newer turn began while processing
       if (this.state.currentTurnId !== currentTurnId) {
+        logVoice(`⚠️ [RESPONSE DISCARDED] Stale turn #${currentTurnId} discarded (current active is #${this.state.currentTurnId})`);
         return;
       }
 
+      logVoice(`✅ [RESPONSE COMMIT] Turn #${currentTurnId}: "${result.responseText}"`);
+
       // Update booking state via result of deterministic reducer
       this.bookingState = result.updatedState;
-      logVoice(`✅ [VoiceController] Turn #${currentTurnId} completed: Action=${result.action.type}, Phase=${result.updatedState.phase}, Score=${result.updatedState.metadata.completionScore}%`);
-      logVoice(`🤖 [VoiceController] Reply: "${result.responseText}"`);
 
       // Track history
       this.history.push({
@@ -321,9 +334,14 @@ export class VoiceSessionController {
       // Notify turn completion
       this.notifyTurnComplete(result);
 
-      // Section 6: Speak response via TTS
+      // Section 6: Speak response via TTS with turn validation
       if (this.voiceEnabled && result.shouldSpeak && this.tts.isSupported()) {
-        await this.speakResponse(result.responseText);
+        if (this.state.currentTurnId === currentTurnId) {
+          logVoice(`🔊 [TTS START] Turn #${currentTurnId}`);
+          await this.speakResponse(result.responseText, currentTurnId);
+        } else {
+          logVoice(`🔇 [TTS CANCEL] Stale turn #${currentTurnId} speech prevented`);
+        }
       } else {
         if (!this.isTerminal) {
           await this.startListening();
@@ -358,7 +376,11 @@ export class VoiceSessionController {
   /**
    * Section 4 & 11: Speak Response with TTS Overlap Prevention
    */
-  public async speakResponse(text: string): Promise<void> {
+  public async speakResponse(text: string, turnId?: number): Promise<void> {
+    if (turnId !== undefined && turnId !== this.state.currentTurnId) {
+      logVoice(`🔇 [TTS CANCEL] Discarding speech for stale turn #${turnId} vs active #${this.state.currentTurnId}`);
+      return;
+    }
     this.state.status = 'SPEAKING';
     this.state.isSpeaking = true;
     this.state.assistantResponse = text;

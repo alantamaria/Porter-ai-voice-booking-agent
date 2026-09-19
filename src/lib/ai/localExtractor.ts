@@ -1,4 +1,4 @@
-import { StateDelta } from '@/types/booking';
+import { StateDelta, BookingState } from '@/types/booking';
 import { normalizeLocation, isUnusableAudio, detectSTTUncertainty } from '@/lib/speech/normalizer';
 import { checkHazardousItem, KNOWN_ITEM_CATALOG } from '@/lib/validation/rules';
 
@@ -7,9 +7,12 @@ import { checkHazardousItem, KNOWN_ITEM_CATALOG } from '@/lib/validation/rules';
  * Fulfills .env.example: "If no API key is provided, the application runs seamlessly using its
  * built-in deterministic local state extractor and rule-based conversational synthesizer."
  */
-export function parseLocalDelta(userUtterance: string): Partial<StateDelta> {
+export function parseLocalDelta(userUtterance: string, currentState?: BookingState): Partial<StateDelta> {
   const text = userUtterance.trim();
-  const lower = text.toLowerCase();
+  // Strip trailing sentence punctuation for cleaner regex matching
+  const cleanedText = text.replace(/[.!,?]+$/g, '').trim();
+  const lower = cleanedText.toLowerCase();
+  const lowerOriginal = text.toLowerCase();
   const delta: Partial<StateDelta> = {
     isOffTopic: false,
     isImpossibleOrHazardous: false,
@@ -179,42 +182,133 @@ export function parseLocalDelta(userUtterance: string): Partial<StateDelta> {
     return delta;
   }
 
-  // 6. Correction
-  if (
+  // 6. Correction detection
+  const isCorrectionUtterance =
     lower.includes('actually') ||
     lower.includes('not ') ||
     lower.includes('instead') ||
     lower.includes('change pickup') ||
-    lower.includes('change dropoff')
-  ) {
+    lower.includes('change dropoff') ||
+    lower.includes('change my pickup') ||
+    lower.includes('change my dropoff') ||
+    lower.includes('change my drop off') ||
+    lower.includes('change my drop-off');
+
+  if (isCorrectionUtterance) {
     delta.userIntent = 'CORRECTION';
-    const pickupMatch = lower.match(/(?:actually|change|pickup|from)\s+(?:pickup is|pickup to|is|to)?\s*([a-z0-9\s]+)/i);
-    if (pickupMatch && !lower.includes('to whitefield') && !lower.includes('to indiranagar')) {
-      delta.pickupLocation = normalizeLocation(pickupMatch[1].trim());
+  }
+
+  // 6a. Contextual relative correction: "Change to <Location>" / "Change it to <Location>"
+  // When user says "change to X" without specifying pickup/dropoff, infer from current state.
+  const changeToMatch = lower.match(/^change\s+(?:it\s+)?to\s+(.+)$/i);
+  if (changeToMatch) {
+    delta.userIntent = 'CORRECTION';
+    const targetLoc = normalizeLocation(changeToMatch[1].trim());
+    // Determine which field to update based on revision history or most recent missing context
+    if (currentState) {
+      const revHistory = currentState.metadata?.revisionHistory || [];
+      const lastLocRevision = [...revHistory].reverse().find(
+        r => r.field === 'pickup.location' || r.field === 'dropoff.location'
+      );
+      if (lastLocRevision?.field === 'dropoff.location') {
+        delta.dropoffLocation = targetLoc;
+      } else {
+        // Default to pickup (most common correction target)
+        delta.pickupLocation = targetLoc;
+      }
+    } else {
+      delta.pickupLocation = targetLoc;
     }
   }
 
-  // 7. Location from -> to
-  const fromToMatch = text.match(/(?:from|pick-?up(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)\s+(?:to|drop-?off(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:tomorrow|today|evening|morning|on|at)|\.|$)/i);
-  if (fromToMatch) {
-    const rawPickup = fromToMatch[1].trim();
-    if (!rawPickup.toLowerCase().includes('somewhere near') && !rawPickup.toLowerCase().includes('near about')) {
-      delta.pickupLocation = normalizeLocation(rawPickup);
-    }
-    delta.dropoffLocation = normalizeLocation(fromToMatch[2].trim());
-  } else {
-    // Check explicit drop-off phrase
-    const toMatch = text.match(/(?:drop-?off(?:\s+is)?|destination(?:\s+is)?|to)\s+(?:also\s+)?([a-zA-Z0-9\s]+?)(?:\s+(?:from|tomorrow|today|\.|$))/i);
-    if (toMatch) {
-      delta.dropoffLocation = normalizeLocation(toMatch[1].trim());
+  // 6b. Explicit correction with field keyword:
+  // "Change my pickup location to X", "Actually my pickup is X", etc.
+  // Extract the LAST location entity after the field keyword phrase.
+  if (isCorrectionUtterance && !changeToMatch) {
+    // Handle mid-sentence self-correction FIRST: "Pickup is X. No, actually Y."
+    // When "actually" appears, it signals the user's FINAL intent — prioritize it.
+    if (lower.includes('actually')) {
+      const actuallyMatch = lower.match(/actually\s+(.+)$/i);
+      if (actuallyMatch) {
+        const afterActually = actuallyMatch[1].trim();
+        // Check if it specifies pickup or dropoff explicitly
+        const afterPickup = afterActually.match(
+          /(?:pick-?up(?:\s+location)?|pick\s+up(?:\s+location)?|from)\s+(?:is|to)?\s*(.+)$/i
+        );
+        const afterDropoff = afterActually.match(
+          /(?:drop-?off(?:\s+location)?|drop\s+off(?:\s+location)?|destination|to)\s+(?:is|to)?\s*(.+)$/i
+        );
+        if (afterPickup) {
+          delta.pickupLocation = normalizeLocation(afterPickup[1].trim());
+        } else if (afterDropoff) {
+          delta.dropoffLocation = normalizeLocation(afterDropoff[1].trim());
+        } else {
+          // Just a bare location name after "actually" — treat as pickup correction by default
+          delta.pickupLocation = normalizeLocation(afterActually);
+        }
+      }
     }
 
-    // Check explicit pickup phrase
-    const fromMatch = text.match(/(?:from|pick-?up(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:to|tomorrow|today|\.|$))/i);
-    if (fromMatch) {
-      const rawPickup = fromMatch[1].trim();
+    // Only try explicit field-keyword regex if "actually" didn't extract anything
+    if (!delta.pickupLocation && !delta.dropoffLocation) {
+      // Try to find pickup location entity after pickup-related keywords
+      const pickupCorrectionMatch = lower.match(
+        /(?:pick-?up(?:\s+location)?|pick\s+up(?:\s+location)?)\s+(?:is|to)\s+(.+)$/i
+      );
+      if (pickupCorrectionMatch) {
+        delta.pickupLocation = normalizeLocation(pickupCorrectionMatch[1].trim());
+      }
+
+      // Try to find dropoff location entity after dropoff-related keywords
+      const dropoffCorrectionMatch = lower.match(
+        /(?:drop-?off(?:\s+location)?|drop\s+off(?:\s+location)?|destination)\s+(?:is|to)\s+(.+)$/i
+      );
+      if (dropoffCorrectionMatch) {
+        delta.dropoffLocation = normalizeLocation(dropoffCorrectionMatch[1].trim());
+      }
+    }
+  }
+
+  // 7. Location from -> to (only if correction didn't already extract locations)
+  // Support both "pick-up", "pickup" and "pick up" (with space)
+  if (!delta.pickupLocation && !delta.dropoffLocation) {
+    const fromToMatch = cleanedText.match(
+      /(?:from|pick-?up(?:\s+is)?|pick\s+up(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)\s+(?:to|drop-?off(?:\s+is)?|drop\s+off(?:\s+is)?)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:tomorrow|today|evening|morning|on|at)|$)/i
+    );
+    if (fromToMatch) {
+      const rawPickup = fromToMatch[1].trim();
       if (!rawPickup.toLowerCase().includes('somewhere near') && !rawPickup.toLowerCase().includes('near about')) {
         delta.pickupLocation = normalizeLocation(rawPickup);
+      }
+      delta.dropoffLocation = normalizeLocation(fromToMatch[2].trim());
+    } else {
+      // Check explicit drop-off phrase
+      // Standalone 'to' must NOT be followed by a verb (book, move, send, etc.) to avoid
+      // misinterpreting intent phrases like "I want to book" as a drop-off location.
+      const toMatch = cleanedText.match(
+        /(?:drop-?off(?:\s+is)?|drop\s+off(?:\s+is)?|destination(?:\s+is)?|to)\s+(?:also\s+)?([a-zA-Z0-9\s]+?)(?:\s+(?:from|tomorrow|today)|$)/i
+      );
+      if (toMatch) {
+        const captured = toMatch[1].trim().toLowerCase();
+        // Reject if the captured text starts with a verb (intent phrase, not a location)
+        const verbPrefixes = /^(book|move|send|shift|deliver|schedule|hire|transport|pick|get|arrange|find|need|want|have)\b/i;
+        if (!verbPrefixes.test(captured)) {
+          delta.dropoffLocation = normalizeLocation(toMatch[1].trim());
+        }
+      }
+
+      // Check explicit pickup phrase
+      // Handle patterns: "from X", "pickup is X", "pickup is from X", "pick up X"
+      const fromMatch = cleanedText.match(
+        /(?:from|pick-?up(?:\s+is(?:\s+from)?)?|pick\s+up(?:\s+is(?:\s+from)?)?)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:to|tomorrow|today)|$)/i
+      );
+      if (fromMatch) {
+        let rawPickup = fromMatch[1].trim();
+        // Strip accidental leading 'from ' if present
+        rawPickup = rawPickup.replace(/^from\s+/i, '');
+        if (!rawPickup.toLowerCase().includes('somewhere near') && !rawPickup.toLowerCase().includes('near about')) {
+          delta.pickupLocation = normalizeLocation(rawPickup);
+        }
       }
     }
   }
@@ -264,6 +358,32 @@ export function parseLocalDelta(userUtterance: string): Partial<StateDelta> {
     delta.scheduleDate = 'yesterday';
   } else if (lower.includes('today') || lower.includes('tonight')) {
     delta.scheduleDate = 'today';
+  } else {
+    const weekdays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+    let weekdayFound = false;
+    for (const wd of weekdays) {
+      if (new RegExp(`\\b(next\\s+|this\\s+|on\\s+)?${wd}\\b`, 'i').test(lower)) {
+        delta.scheduleDate = wd;
+        weekdayFound = true;
+        break;
+      }
+    }
+
+    // Natural date strings: "21st September 2026", "September 21 2026", "3rd October"
+    if (!weekdayFound) {
+      const naturalDateMatch = cleanedText.match(
+        /\b(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(\d{4}))?\b/i
+      ) || cleanedText.match(
+        /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s*,?\s*(\d{4}))?\b/i
+      );
+      if (naturalDateMatch) {
+        // Normalize ordinal suffixes and pass through to validateBookingDate
+        const cleanedDateStr = cleanedText
+          .replace(/(\d+)(?:st|nd|rd|th)\b/gi, (m: string, d: string) => d)
+          .trim();
+        delta.scheduleDate = cleanedDateStr;
+      }
+    }
   }
 
   // 9. Time & Ambiguity
@@ -293,7 +413,10 @@ export function parseLocalDelta(userUtterance: string): Partial<StateDelta> {
     const itemsToAdd: Array<{ name: string; quantity: number }> = [];
     const sortedItemNames = Object.keys(KNOWN_ITEM_CATALOG).sort((a, b) => b.length - a.length);
     for (const itemName of sortedItemNames) {
-      if (lower.includes(itemName)) {
+      // Use word boundary matching to prevent substring false positives
+      // e.g. 'ac' must not match inside 'actually'
+      const itemBoundaryRegex = new RegExp(`\\b${itemName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (itemBoundaryRegex.test(lowerOriginal)) {
         // Prevent duplicate matching for box / boxes and bed / double bed
         if (itemName === 'box' && itemsToAdd.some(i => i.name === 'boxes' || i.name === 'carton box')) {
           continue;
