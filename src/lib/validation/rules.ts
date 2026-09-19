@@ -83,8 +83,21 @@ const PROHIBITED_KEYWORDS = [
 ];
 
 /**
+ * Formats a Date object into an ISO date string (YYYY-MM-DD)
+ * using the date's local calendar components to prevent UTC timezone shifts.
+ */
+export function formatDateToISO(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
  * SECTION 6.A: Past-Date Validation
  * Checks whether a booking date is valid and strictly >= current calendar date.
+ * Handles relative phrases ("today", "tomorrow", "day after tomorrow", "yesterday")
+ * and ISO calendar dates across month and year boundaries.
  */
 export function validateBookingDate(
   dateStr: string,
@@ -94,15 +107,16 @@ export function validateBookingDate(
     return { isValid: false, isPast: false, error: 'Booking date is required.' };
   }
 
-  const todayZero = new Date(baseDate);
-  todayZero.setHours(0, 0, 0, 0);
+  // Create a clean base date normalized to midnight local time
+  const todayZero = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
 
   const lower = dateStr.toLowerCase().trim();
-  const target = new Date(baseDate);
+  const target = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
 
   if (lower.includes('yesterday') || lower.includes('day before yesterday')) {
-    target.setDate(target.getDate() - 1);
-    const iso = target.toISOString().split('T')[0];
+    const daysBack = lower.includes('day before yesterday') ? 2 : 1;
+    target.setDate(target.getDate() - daysBack);
+    const iso = formatDateToISO(target);
     return {
       isValid: false,
       isPast: true,
@@ -111,20 +125,46 @@ export function validateBookingDate(
     };
   }
 
-  if (lower.includes('day after tomorrow')) {
+  if (
+    lower.includes('day after tomorrow') ||
+    lower.includes('the day after tomorrow') ||
+    lower.includes('after tomorrow')
+  ) {
     target.setDate(target.getDate() + 2);
   } else if (lower.includes('tomorrow')) {
     target.setDate(target.getDate() + 1);
   } else if (lower.includes('today') || lower.includes('tonight')) {
-    // today is valid
+    // today is valid (target is already baseDate calendar day)
   } else {
+    // Check explicit ISO format (YYYY-MM-DD)
+    const isoMatch = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoMatch) {
+      const year = parseInt(isoMatch[1], 10);
+      const month = parseInt(isoMatch[2], 10) - 1;
+      const day = parseInt(isoMatch[3], 10);
+      const parsedDate = new Date(year, month, day);
+      if (
+        parsedDate.getFullYear() !== year ||
+        parsedDate.getMonth() !== month ||
+        parsedDate.getDate() !== day
+      ) {
+        return { isValid: false, isPast: false, error: 'Invalid date format.' };
+      }
+      const isPast = parsedDate.getTime() < todayZero.getTime();
+      return {
+        isValid: !isPast,
+        isPast,
+        isoDate: dateStr.trim(),
+        error: isPast ? `Booking date (${dateStr.trim()}) cannot be in the past.` : undefined
+      };
+    }
+
     const parsed = new Date(dateStr);
     if (isNaN(parsed.getTime())) {
       return { isValid: false, isPast: false, error: 'Invalid date format.' };
     }
-    const parsedZero = new Date(parsed);
-    parsedZero.setHours(0, 0, 0, 0);
-    const iso = parsed.toISOString().split('T')[0];
+    const parsedZero = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+    const iso = formatDateToISO(parsedZero);
     const isPast = parsedZero.getTime() < todayZero.getTime();
     return {
       isValid: !isPast,
@@ -134,9 +174,8 @@ export function validateBookingDate(
     };
   }
 
-  const iso = target.toISOString().split('T')[0];
-  const targetZero = new Date(target);
-  targetZero.setHours(0, 0, 0, 0);
+  const iso = formatDateToISO(target);
+  const targetZero = new Date(target.getFullYear(), target.getMonth(), target.getDate());
   const isPast = targetZero.getTime() < todayZero.getTime();
 
   return {

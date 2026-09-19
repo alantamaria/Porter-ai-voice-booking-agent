@@ -55,10 +55,12 @@ export const VoiceControl: React.FC<VoiceControlProps> = ({
     }
   };
 
+  const isDisplayableError = Boolean(micError && !micError.toLowerCase().includes('network'));
+
   return (
     <div className="voice-control-card" role="region" aria-label="Voice and text controls">
       {/* Dismissible Error Banner */}
-      {micError && (
+      {isDisplayableError && (
         <div className="error-banner" role="alert">
           <AlertTriangle className="icon-sm text-danger" aria-hidden="true" />
           <span className="error-text">{micError}</span>

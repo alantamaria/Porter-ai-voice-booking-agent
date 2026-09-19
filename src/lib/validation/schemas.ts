@@ -124,6 +124,7 @@ export const StateDeltaSchema = z.object({
     'CANCELLATION',
     'RESTART',
     'OFF_TOPIC',
+    'GREETING',
     'UNKNOWN',
     'BOOKING_INQUIRY',
     'PROVIDING_INFO',

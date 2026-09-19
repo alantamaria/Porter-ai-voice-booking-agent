@@ -11,6 +11,18 @@ import { createInitialBookingState } from '@/lib/state/stateMachine';
 import { BrowserSTTProvider } from './sttProvider';
 import { BrowserTTSProvider } from './ttsProvider';
 
+function logVoice(...args: unknown[]): void {
+  if (typeof window !== 'undefined') {
+    console.log(...args);
+  }
+}
+
+function warnVoice(...args: unknown[]): void {
+  if (typeof window !== 'undefined') {
+    console.warn(...args);
+  }
+}
+
 /**
  * STEP 5: Voice Session Controller (Section 2, 6, 16)
  * Coordinates STT, TTS, silence timeouts, turn locking, and interruption.
@@ -35,6 +47,7 @@ export class VoiceSessionController {
   private isTurnProcessing: boolean = false;
   private isTerminal: boolean = false;
   private voiceEnabled: boolean = true;
+  private lastAssistantSpokenTime: number = 0;
 
   constructor(options?: VoiceControllerOptions) {
     this.stt = options?.sttProvider || new BrowserSTTProvider();
@@ -62,13 +75,31 @@ export class VoiceSessionController {
   private bindProviderEvents(): void {
     // STT Events
     this.stt.onTranscript((text: string, isFinal: boolean) => {
+      const isSpeakingNow = this.tts.isSpeaking() || this.state.status === 'SPEAKING' || this.state.isSpeaking;
+      const isRecentAssistantSpeech = Date.now() - this.lastAssistantSpokenTime < 1500;
+      const assistantText = (this.state.assistantResponse || '').trim().toLowerCase();
+      const incomingText = text.trim().toLowerCase();
+
+      // Ignore acoustic echo of the assistant's own spoken prompt
+      if (
+        assistantText &&
+        incomingText &&
+        (assistantText.includes(incomingText) || incomingText.includes(assistantText)) &&
+        (isSpeakingNow || isRecentAssistantSpeech)
+      ) {
+        logVoice('🔇 [VoiceController] Ignoring acoustic echo of assistant speech:', text);
+        return;
+      }
+
       // Section 10: Interruption / Barge-in
       // If user starts talking while assistant is speaking, kill TTS immediately
-      if (this.tts.isSpeaking() || this.state.status === 'SPEAKING') {
+      if (isSpeakingNow) {
+        logVoice('🛑 [VoiceController] Barge-in detected! Stopping assistant speech.');
         this.interruptSpeech();
       }
 
       if (isFinal) {
+        logVoice('🎤 [VoiceController] Final transcript:', text);
         this.clearSilenceTimer();
         this.state.interimTranscript = '';
         this.state.finalTranscript = text;
@@ -84,6 +115,15 @@ export class VoiceSessionController {
 
     this.stt.onError((error: string) => {
       this.clearSilenceTimer();
+      if (error.toLowerCase().includes('network')) {
+        this.state.isListening = false;
+        if (this.state.status === 'LISTENING') {
+          this.state.status = 'IDLE';
+        }
+        this.notifyState();
+        return;
+      }
+      warnVoice('⚠️ [VoiceController] STT Error:', error);
       this.state.status = 'ERROR';
       this.state.isListening = false;
       this.state.errorMessage = error;
@@ -94,6 +134,7 @@ export class VoiceSessionController {
     });
 
     this.stt.onStart?.(() => {
+      logVoice('🎙️ [VoiceController] Microphone listening active');
       this.state.isListening = true;
       if (this.state.status !== 'SPEAKING' && this.state.status !== 'PROCESSING') {
         this.state.status = 'LISTENING';
@@ -103,6 +144,7 @@ export class VoiceSessionController {
     });
 
     this.stt.onEnd?.(() => {
+      logVoice('🎙️ [VoiceController] Microphone listening paused/ended');
       this.state.isListening = false;
       if (this.state.status === 'LISTENING') {
         this.state.status = 'IDLE';
@@ -113,12 +155,14 @@ export class VoiceSessionController {
 
     // TTS Events
     this.tts.onStart?.(() => {
+      logVoice('🔊 [VoiceController] Assistant speaking audio started');
       this.state.isSpeaking = true;
       this.state.status = 'SPEAKING';
       this.notifyState();
     });
 
     this.tts.onEnd?.(() => {
+      logVoice('🔊 [VoiceController] Assistant speaking audio finished');
       this.state.isSpeaking = false;
       // If not interrupted and conversation is not terminal, resume listening
       if (!this.state.isInterrupted && !this.isTerminal) {
@@ -132,6 +176,7 @@ export class VoiceSessionController {
     });
 
     this.tts.onError?.((err: string) => {
+      warnVoice('⚠️ [VoiceController] TTS Error:', err);
       this.state.isSpeaking = false;
       this.state.status = 'IDLE';
       this.state.errorMessage = err;
@@ -180,6 +225,7 @@ export class VoiceSessionController {
     this.clearSilenceTimer();
     await this.stt.stopListening();
     this.state.isListening = false;
+    this.state.interimTranscript = '';
     if (this.state.status === 'LISTENING') {
       this.state.status = 'IDLE';
     }
@@ -230,6 +276,7 @@ export class VoiceSessionController {
     await this.stt.stopListening();
 
     try {
+      logVoice(`💬 [VoiceController] Turn #${currentTurnId} processing: "${cleaned}"`);
       const result = await this.processTurnFn({
         userUtterance: cleaned,
         currentState: this.bookingState,
@@ -244,6 +291,8 @@ export class VoiceSessionController {
 
       // Update booking state via result of deterministic reducer
       this.bookingState = result.updatedState;
+      logVoice(`✅ [VoiceController] Turn #${currentTurnId} completed: Action=${result.action.type}, Phase=${result.updatedState.phase}, Score=${result.updatedState.metadata.completionScore}%`);
+      logVoice(`🤖 [VoiceController] Reply: "${result.responseText}"`);
 
       // Track history
       this.history.push({
@@ -312,6 +361,8 @@ export class VoiceSessionController {
   public async speakResponse(text: string): Promise<void> {
     this.state.status = 'SPEAKING';
     this.state.isSpeaking = true;
+    this.state.assistantResponse = text;
+    this.lastAssistantSpokenTime = Date.now();
     this.notifyState();
 
     await this.tts.speak(text);
@@ -329,6 +380,7 @@ export class VoiceSessionController {
     this.notifyState();
 
     if (this.tts.isSupported()) {
+      await this.stt.stopListening();
       await this.speakResponse(prompt);
     } else {
       await this.startListening();

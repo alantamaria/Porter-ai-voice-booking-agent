@@ -28,6 +28,7 @@ export default function Home() {
     const controller = new VoiceSessionController({
       silenceTimeoutMs: 6000,
       processTurnFn: async (input) => {
+        console.log('🌐 [Client] Sending turn to /api/chat:', input.userUtterance);
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -44,6 +45,7 @@ export default function Home() {
         }
 
         const data: ChatApiResponse = await res.json();
+        console.log('📥 [Client] Received /api/chat reply:', data.reply, `(Phase: ${data.phase}, Score: ${data.updatedState.metadata.completionScore}%)`);
         return {
           responseText: data.reply,
           action: data.action || { type: 'GREET' },
@@ -61,14 +63,19 @@ export default function Home() {
       setIsLoading(vState.status === 'PROCESSING');
       setIsAgentSpeaking(vState.status === 'SPEAKING');
       setInterimTranscript(vState.interimTranscript);
-      if (vState.errorMessage) {
+      if (vState.status !== 'ERROR') {
+        setMicError(null);
+      } else if (vState.errorMessage && !vState.errorMessage.toLowerCase().includes('network')) {
         setMicError(vState.errorMessage);
+      } else {
+        setMicError(null);
       }
     });
 
     controller.onTurnComplete((res) => {
       setBookingState(res.updatedState);
       setHistory(controller.getHistory());
+      setMicError(null);
     });
 
     controllerRef.current = controller;
@@ -86,6 +93,7 @@ export default function Home() {
   // Turn sender (Text fallback, suggestion prompts, or confirm)
   const handleSendMessage = async (text: string) => {
     if (!text.trim() || isLoading) return;
+    console.log('✍️ [Client] Sending user message:', text);
     setMicError(null);
     await controllerRef.current?.handleTextFallback(text);
   };
@@ -96,8 +104,10 @@ export default function Home() {
     if (!controller) return;
 
     if (isListening) {
+      console.log('🎙️ [Client] User paused microphone');
       await controller.stopListening();
     } else {
+      console.log('🎙️ [Client] User activated microphone');
       setMicError(null);
       await controller.startListening();
     }
@@ -105,11 +115,13 @@ export default function Home() {
 
   // Stop Speaking (Barge-in / interruption)
   const handleStopSpeaking = () => {
+    console.log('🛑 [Client] User interrupted assistant speech');
     controllerRef.current?.interruptSpeech();
   };
 
   // Reset entire conversation
   const handleResetConversation = () => {
+    console.log('🔄 [Client] Resetting entire booking session');
     const newSessionId = `session-${Date.now()}`;
     controllerRef.current?.reset(newSessionId);
     setBookingState(createInitialBookingState(newSessionId));
@@ -121,6 +133,7 @@ export default function Home() {
 
   // Confirm booking from review card
   const handleConfirmBooking = async () => {
+    console.log('✅ [Client] User clicked confirm booking button');
     await handleSendMessage('Yes, confirm it.');
   };
 

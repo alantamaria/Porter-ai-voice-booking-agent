@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { extractStateDelta } from '../../lib/ai/extractor';
+import { parseLocalDelta } from '../../lib/ai/localExtractor';
 import { LLMClient, MockLLMProvider } from '../../lib/ai/llmClient';
 import { applyStateDelta, createInitialBookingState } from '../../lib/state/stateMachine';
 
@@ -391,5 +392,81 @@ describe('STEP 3: LLM Structured Extractor Unit Tests', () => {
 
     assert.equal(result.success, false);
     assert.equal(result.error?.code, 'SCHEMA_VALIDATION_FAILED');
+  });
+
+  // Test 23: Relative date extraction preserves day after tomorrow
+  it('23. Relative date extraction preserves day after tomorrow', () => {
+    const delta = parseLocalDelta('I want to book for day after tomorrow');
+    assert.equal(delta.scheduleDate, 'day after tomorrow');
+
+    const tomorrowDelta = parseLocalDelta('Schedule for tomorrow at 3 PM');
+    assert.equal(tomorrowDelta.scheduleDate, 'tomorrow');
+
+    const todayDelta = parseLocalDelta('Move today at 5 PM');
+    assert.equal(todayDelta.scheduleDate, 'today');
+  });
+
+  // Test 24: Greeting detection in local extractor
+  it('24. Local extractor detects casual greetings as GREETING intent', () => {
+    const hi = parseLocalDelta('Hi');
+    assert.equal(hi.userIntent, 'GREETING');
+
+    const hello = parseLocalDelta('Hello');
+    assert.equal(hello.userIntent, 'GREETING');
+
+    const goodMorning = parseLocalDelta('Good morning');
+    assert.equal(goodMorning.userIntent, 'GREETING');
+
+    const howAreYou = parseLocalDelta('How are you?');
+    assert.equal(howAreYou.userIntent, 'GREETING');
+
+    const compound = parseLocalDelta('Hi, hello. How are you?');
+    assert.equal(compound.userIntent, 'GREETING');
+
+    const whatsUp = parseLocalDelta("What's up?");
+    assert.equal(whatsUp.userIntent, 'GREETING');
+  });
+
+  // Test 25: Booking intent is NOT classified as greeting
+  it('25. Local extractor does NOT classify booking utterances as GREETING', () => {
+    const booking = parseLocalDelta('I want to book a Porter');
+    assert.notEqual(booking.userIntent, 'GREETING');
+
+    const move = parseLocalDelta('I need to move my furniture');
+    assert.notEqual(move.userIntent, 'GREETING');
+
+    const send = parseLocalDelta('I want to send a package');
+    assert.notEqual(send.userIntent, 'GREETING');
+
+    // "Hi, I want to book a move" should NOT be a greeting (has booking content)
+    const greetWithBooking = parseLocalDelta('Hi, I want to book a move');
+    assert.notEqual(greetWithBooking.userIntent, 'GREETING');
+  });
+
+  // Test 26: Filler and waiting phrases detected as non-booking (GREETING)
+  it('26. Local extractor detects waiting and filler phrases as non-booking', () => {
+    const stillListening = parseLocalDelta("I'm still listening");
+    assert.equal(stillListening.userIntent, 'GREETING');
+
+    const justStillListening = parseLocalDelta('still listening');
+    assert.equal(justStillListening.userIntent, 'GREETING');
+
+    const imListening = parseLocalDelta("I'm listening");
+    assert.equal(imListening.userIntent, 'GREETING');
+
+    const waitAMoment = parseLocalDelta('wait a moment');
+    assert.equal(waitAMoment.userIntent, 'GREETING');
+
+    const holdOn = parseLocalDelta('hold on');
+    assert.equal(holdOn.userIntent, 'GREETING');
+
+    const justAMinute = parseLocalDelta('just a minute');
+    assert.equal(justAMinute.userIntent, 'GREETING');
+
+    const giveMeASec = parseLocalDelta('give me a second');
+    assert.equal(giveMeASec.userIntent, 'GREETING');
+
+    const letMeThink = parseLocalDelta('let me think');
+    assert.equal(letMeThink.userIntent, 'GREETING');
   });
 });

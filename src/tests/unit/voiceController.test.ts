@@ -445,4 +445,95 @@ describe('STEP 5: Voice Session Controller Unit Tests', () => {
     assert.equal(textReceived, 'Typed text input for fallback');
     assert.equal(controller.getState().assistantResponse, 'Text handled cleanly');
   });
+
+  // 22. Consecutive voice transcripts are processed cleanly in sequence
+  it('22. Consecutive voice transcripts are processed cleanly in sequence', async () => {
+    const stt = new MockSTTProvider();
+    const tts = new MockTTSProvider();
+    const processedTurns: string[] = [];
+
+    const controller = new VoiceSessionController({
+      sttProvider: stt,
+      ttsProvider: tts,
+      processTurnFn: async (input) => {
+        processedTurns.push(input.userUtterance);
+        return createMockProcessTurn(`Response to ${input.userUtterance}`)({ userUtterance: input.userUtterance });
+      }
+    });
+
+    await controller.startListening();
+
+    // Turn 1
+    stt.simulateTranscript('Hi, hello. How are you?', true);
+    await new Promise(r => setTimeout(r, 30));
+    assert.equal(processedTurns.length, 1);
+    assert.equal(processedTurns[0], 'Hi, hello. How are you?');
+
+    // Turn 2
+    stt.simulateTranscript("I'm still listening.", true);
+    await new Promise(r => setTimeout(r, 30));
+    assert.equal(processedTurns.length, 2);
+    assert.equal(processedTurns[1], "I'm still listening.");
+
+    // Turn 3
+    stt.simulateTranscript('I want to book a Porter.', true);
+    await new Promise(r => setTimeout(r, 30));
+    assert.equal(processedTurns.length, 3);
+    assert.equal(processedTurns[2], 'I want to book a Porter.');
+  });
+
+  // 23. Repeated voice inputs with identical utterance in consecutive turns are both processed
+  it('23. Repeated voice input with identical utterance in consecutive turns is processed cleanly', async () => {
+    const stt = new MockSTTProvider();
+    const tts = new MockTTSProvider();
+    const processedTurns: string[] = [];
+
+    const controller = new VoiceSessionController({
+      sttProvider: stt,
+      ttsProvider: tts,
+      processTurnFn: async (input) => {
+        processedTurns.push(input.userUtterance);
+        return createMockProcessTurn('Acknowledged')({ userUtterance: input.userUtterance });
+      }
+    });
+
+    await controller.startListening();
+
+    // Turn 1
+    stt.simulateTranscript("I'm still listening.", true);
+    await new Promise(r => setTimeout(r, 30));
+    assert.equal(processedTurns.length, 1);
+
+    // Turn 2: User says the same thing again after Turn 1 completed
+    stt.simulateTranscript("I'm still listening.", true);
+    await new Promise(r => setTimeout(r, 30));
+    assert.equal(processedTurns.length, 2);
+  });
+
+  // 24. Acoustic echo of assistant response during speech does not trigger barge-in or process turn
+  it('24. Acoustic echo of assistant response during speech does not trigger barge-in or process turn', async () => {
+    const stt = new MockSTTProvider();
+    const tts = new MockTTSProvider();
+    let turnCount = 0;
+
+    const controller = new VoiceSessionController({
+      sttProvider: stt,
+      ttsProvider: tts,
+      processTurnFn: async (input) => {
+        turnCount++;
+        return createMockProcessTurn("I'm still listening. What would you like to add?")({ userUtterance: input.userUtterance });
+      }
+    });
+
+    await controller.startListening();
+    // Simulate assistant speaking
+    await controller.speakResponse("I'm still listening. What would you like to add?");
+
+    // STT hears microphone picking up speaker audio (echo of assistant response)
+    stt.simulateTranscript("I'm still listening", true);
+    await new Promise(r => setTimeout(r, 30));
+
+    // Must NOT process the echoed text as a user turn
+    assert.equal(turnCount, 0);
+  });
 });

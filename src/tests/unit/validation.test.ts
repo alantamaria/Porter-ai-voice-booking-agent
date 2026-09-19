@@ -37,6 +37,79 @@ describe('Validation & Domain Rules Unit Tests', () => {
     assert.equal(explicitFuture.isPast, false);
   });
 
+  it('should correctly resolve relative dates: today, tomorrow, and day after tomorrow', () => {
+    const baseDate = new Date('2026-09-19T10:00:00');
+
+    // today = current date (2026-09-19)
+    const today = validateBookingDate('today', baseDate);
+    assert.equal(today.isValid, true);
+    assert.equal(today.isPast, false);
+    assert.equal(today.isoDate, '2026-09-19');
+
+    // tomorrow = current date + 1 (2026-09-20)
+    const tomorrow = validateBookingDate('tomorrow', baseDate);
+    assert.equal(tomorrow.isValid, true);
+    assert.equal(tomorrow.isPast, false);
+    assert.equal(tomorrow.isoDate, '2026-09-20');
+
+    // day after tomorrow = current date + 2 (2026-09-21)
+    const dayAfter = validateBookingDate('day after tomorrow', baseDate);
+    assert.equal(dayAfter.isValid, true);
+    assert.equal(dayAfter.isPast, false);
+    assert.equal(dayAfter.isoDate, '2026-09-21');
+
+    // the day after tomorrow variation
+    const theDayAfter = validateBookingDate('the day after tomorrow', baseDate);
+    assert.equal(theDayAfter.isValid, true);
+    assert.equal(theDayAfter.isoDate, '2026-09-21');
+
+    // yesterday = current date - 1 (2026-09-18)
+    const yesterday = validateBookingDate('yesterday', baseDate);
+    assert.equal(yesterday.isValid, false);
+    assert.equal(yesterday.isPast, true);
+    assert.equal(yesterday.isoDate, '2026-09-18');
+  });
+
+  it('should correctly handle month and year boundaries in relative date arithmetic', () => {
+    // Month boundary: End of September (30 days)
+    const endOfSept = new Date('2026-09-30T10:00:00');
+    const septTomorrow = validateBookingDate('tomorrow', endOfSept);
+    assert.equal(septTomorrow.isoDate, '2026-10-01');
+
+    const septDayAfter = validateBookingDate('day after tomorrow', endOfSept);
+    assert.equal(septDayAfter.isoDate, '2026-10-02');
+
+    // Month boundary: 31-day month (October)
+    const endOfOct = new Date('2026-10-31T10:00:00');
+    const octTomorrow = validateBookingDate('tomorrow', endOfOct);
+    assert.equal(octTomorrow.isoDate, '2026-11-01');
+
+    // Non-leap year February (2026: 28 days)
+    const feb28NonLeap = new Date('2026-02-28T10:00:00');
+    const nonLeapTomorrow = validateBookingDate('tomorrow', feb28NonLeap);
+    assert.equal(nonLeapTomorrow.isoDate, '2026-03-01');
+
+    const nonLeapDayAfter = validateBookingDate('day after tomorrow', feb28NonLeap);
+    assert.equal(nonLeapDayAfter.isoDate, '2026-03-02');
+
+    // Leap year February (2028: 29 days)
+    const feb28Leap = new Date('2028-02-28T10:00:00');
+    const leapTomorrow = validateBookingDate('tomorrow', feb28Leap);
+    assert.equal(leapTomorrow.isoDate, '2028-02-29');
+
+    const leapDayAfter = validateBookingDate('day after tomorrow', feb28Leap);
+    assert.equal(leapDayAfter.isoDate, '2028-03-01');
+
+    // Year boundary: Dec 31 to Jan 1 of next year
+    const newYearsEve = new Date('2026-12-31T10:00:00');
+    const newYearTomorrow = validateBookingDate('tomorrow', newYearsEve);
+    assert.equal(newYearTomorrow.isoDate, '2027-01-01');
+
+    const dec30 = new Date('2026-12-30T10:00:00');
+    const newYearDayAfter = validateBookingDate('day after tomorrow', dec30);
+    assert.equal(newYearDayAfter.isoDate, '2027-01-01');
+  });
+
   it('should normalize Indian logistics localities with STT phonetics', () => {
     assert.equal(normalizeLocation('Core Mangala 4th block'), 'Koramangala 4th block');
     assert.equal(normalizeLocation('I want to go to White Field'), 'I want to go to Whitefield');

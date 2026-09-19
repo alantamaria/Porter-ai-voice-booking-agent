@@ -7,6 +7,7 @@ import {
   generateReviewSummary,
   processUserTurn
 } from '../../lib/conversation/conversationManager';
+import { parseLocalDelta } from '../../lib/ai/localExtractor';
 import { createInitialBookingState } from '../../lib/state/stateMachine';
 import { LLMClient, MockLLMProvider } from '../../lib/ai/llmClient';
 import { ConversationAction, InventoryItem, StateDelta } from '../../types/booking';
@@ -493,5 +494,194 @@ describe('STEP 4: Conversation Manager & Next-Action Determinism', () => {
     assert.equal(state.dropoff.normalizedLocation, 'Whitefield');
     assert.equal(state.schedule.parsedTimeSlot, '2:00 PM');
     assert.equal(state.metadata.turnCount, 4);
+  });
+
+  // 26. Greeting intent: "Hi, hello. How are you?" should NOT trigger booking flow
+  it('26. Greeting "Hi, hello. How are you?" returns HANDLE_GREETING, not booking prompt', async () => {
+    const state = createInitialBookingState();
+    const client = createMockClient({ userIntent: 'GREETING' });
+    const res = await processUserTurn({ userUtterance: 'Hi, hello. How are you?', currentState: state }, client);
+    assert.equal(res.action.type, 'HANDLE_GREETING');
+    assert.ok(!res.responseText.toLowerCase().includes('pick the items up from'));
+    assert.ok(!res.responseText.toLowerCase().includes('where are they going'));
+  });
+
+  // 27. Simple "Hello" greeting does not start booking
+  it('27. Simple "Hello" greeting returns HANDLE_GREETING', async () => {
+    const state = createInitialBookingState();
+    const client = createMockClient({ userIntent: 'GREETING' });
+    const res = await processUserTurn({ userUtterance: 'Hello', currentState: state }, client);
+    assert.equal(res.action.type, 'HANDLE_GREETING');
+  });
+
+  // 28. "Good morning" greeting does not start booking
+  it('28. "Good morning" greeting returns HANDLE_GREETING', async () => {
+    const state = createInitialBookingState();
+    const client = createMockClient({ userIntent: 'GREETING' });
+    const res = await processUserTurn({ userUtterance: 'Good morning', currentState: state }, client);
+    assert.equal(res.action.type, 'HANDLE_GREETING');
+  });
+
+  // 29. "I want to book a Porter" should trigger booking flow
+  it('29. "I want to book a Porter" triggers booking flow (ASK_FOR_MISSING_INFORMATION)', async () => {
+    const state = createInitialBookingState();
+    const client = createMockClient({ userIntent: 'BOOKING' });
+    const res = await processUserTurn({ userUtterance: 'I want to book a Porter', currentState: state }, client);
+    assert.equal(res.action.type, 'ASK_FOR_MISSING_INFORMATION');
+  });
+
+  // 30. "I need to move my furniture" should trigger booking flow
+  it('30. "I need to move my furniture" triggers booking flow', async () => {
+    const state = createInitialBookingState();
+    const client = createMockClient({ userIntent: 'BOOKING' });
+    const res = await processUserTurn({ userUtterance: 'I need to move my furniture', currentState: state }, client);
+    assert.equal(res.action.type, 'ASK_FOR_MISSING_INFORMATION');
+  });
+
+  // 31. "I want to send a package" should trigger booking flow
+  it('31. "I want to send a package" triggers booking flow', async () => {
+    const state = createInitialBookingState();
+    const client = createMockClient({ userIntent: 'BOOKING' });
+    const res = await processUserTurn({ userUtterance: 'I want to send a package', currentState: state }, client);
+    assert.equal(res.action.type, 'ASK_FOR_MISSING_INFORMATION');
+  });
+
+  // 32. HANDLE_GREETING deterministic fallback response is natural and warm
+  it('32. HANDLE_GREETING fallback response is natural, not a booking question', () => {
+    const state = createInitialBookingState();
+    const action: ConversationAction = { type: 'HANDLE_GREETING' };
+    const response = generateDeterministicFallbackResponse(action, state);
+    assert.ok(response.toLowerCase().includes('hi') || response.toLowerCase().includes('hello') || response.toLowerCase().includes('hey'));
+    assert.ok(!response.toLowerCase().includes('pick the items up from'));
+    assert.ok(!response.toLowerCase().includes('where are they going'));
+  });
+
+  // 33. determineNextAction routes GREETING intent to HANDLE_GREETING action
+  it('33. determineNextAction routes GREETING intent to HANDLE_GREETING', () => {
+    const state = createInitialBookingState();
+    const delta: Partial<StateDelta> = { userIntent: 'GREETING' };
+    const action = determineNextAction(state, delta as StateDelta);
+    assert.equal(action.type, 'HANDLE_GREETING');
+  });
+
+  // 34. "I'm still listening" and "still listening" do NOT trigger booking prompts
+  it('34. "I\'m still listening" and "still listening" do NOT trigger booking prompts', async () => {
+    const state = createInitialBookingState();
+
+    const res1 = await processUserTurn({ userUtterance: "I'm still listening", currentState: state }, createMockClient({ userIntent: 'GREETING' }));
+    assert.equal(res1.action.type, 'HANDLE_GREETING');
+    assert.ok(!res1.responseText.toLowerCase().includes('pick the items up from'));
+    assert.ok(!res1.responseText.toLowerCase().includes('where are they going'));
+
+    const res2 = await processUserTurn({ userUtterance: 'still listening', currentState: state }, createMockClient({ userIntent: 'GREETING' }));
+    assert.equal(res2.action.type, 'HANDLE_GREETING');
+    assert.ok(!res2.responseText.toLowerCase().includes('pick the items up from'));
+    assert.ok(!res2.responseText.toLowerCase().includes('where are they going'));
+  });
+
+  // 35. "wait a moment" and "hold on" do NOT trigger booking prompts
+  it('35. "wait a moment" and "hold on" do NOT trigger booking prompts', async () => {
+    const state = createInitialBookingState();
+
+    const res1 = await processUserTurn({ userUtterance: 'wait a moment', currentState: state }, createMockClient({ userIntent: 'GREETING' }));
+    assert.equal(res1.action.type, 'HANDLE_GREETING');
+    assert.ok(!res1.responseText.toLowerCase().includes('pick the items up from'));
+
+    const res2 = await processUserTurn({ userUtterance: 'hold on', currentState: state }, createMockClient({ userIntent: 'GREETING' }));
+    assert.equal(res2.action.type, 'HANDLE_GREETING');
+    assert.ok(!res2.responseText.toLowerCase().includes('pick the items up from'));
+  });
+
+  // 36. Filler phrases (ok, sure, let me think) do NOT trigger booking prompts
+  it('36. Filler phrases do NOT trigger booking prompts', async () => {
+    const state = createInitialBookingState();
+
+    for (const filler of ['just a minute', 'give me a second', 'let me think']) {
+      const res = await processUserTurn({ userUtterance: filler, currentState: state }, createMockClient({ userIntent: 'GREETING' }));
+      assert.equal(res.action.type, 'HANDLE_GREETING');
+      assert.ok(!res.responseText.toLowerCase().includes('pick the items up from'));
+    }
+  });
+
+  // 37. Systemic safety net: Empty delta with default PROVIDE_INFORMATION does NOT trigger booking prompt if booking not started
+  it('37. Systemic safety net prevents empty delta from prompting for pickup/dropoff', () => {
+    const state = createInitialBookingState();
+    // Delta has default PROVIDE_INFORMATION intent but no fields extracted (e.g. unrecognizable or non-booking phrase)
+    const emptyDelta: StateDelta = { userIntent: 'PROVIDE_INFORMATION' };
+    const action = determineNextAction(state, emptyDelta);
+    assert.equal(action.type, 'HANDLE_GREETING');
+  });
+
+  // 38. Exact sequence from Requirement 13: Greeting -> Still listening -> Booking request
+  it('38. Exact multi-turn sequence: Greeting -> Still listening -> Booking request', async () => {
+    let state = createInitialBookingState('req-13-seq');
+
+    // Turn 1: Greeting
+    const t1 = await processUserTurn(
+      { userUtterance: 'Hi, hello. How are you?', currentState: state },
+      createMockClient({ userIntent: 'GREETING' })
+    );
+    state = t1.updatedState;
+    assert.equal(t1.action.type, 'HANDLE_GREETING');
+    assert.ok(t1.responseText.toLowerCase().includes('hi') || t1.responseText.toLowerCase().includes('hello') || t1.responseText.toLowerCase().includes('doing well'));
+    assert.ok(!t1.responseText.toLowerCase().includes('pick the items up from'));
+
+    // Turn 2: "I'm still listening."
+    const t2 = await processUserTurn(
+      { userUtterance: "I'm still listening.", currentState: state },
+      createMockClient({ userIntent: 'GREETING' })
+    );
+    state = t2.updatedState;
+    assert.equal(t2.action.type, 'HANDLE_GREETING');
+    assert.equal(t2.responseText, "No problem, take your time. I'm listening.");
+
+    // Turn 3: "I want to book a Porter."
+    const t3 = await processUserTurn(
+      { userUtterance: 'I want to book a Porter.', currentState: state },
+      createMockClient({ userIntent: 'BOOKING' })
+    );
+    state = t3.updatedState;
+    assert.equal(t3.action.type, 'ASK_FOR_MISSING_INFORMATION');
+    assert.equal(t3.responseText, 'Sure! Where should we pick the items up from, and where are they going?');
+  });
+
+  // 39. Non-booking conversational phrases: "wait", "hold on", "I'm listening"
+  it('39. "wait", "hold on", and "I\'m listening" respond conversationally without triggering booking', async () => {
+    const state = createInitialBookingState();
+
+    const resWait = await processUserTurn(
+      { userUtterance: 'wait', currentState: state },
+      createMockClient({ userIntent: 'GREETING' })
+    );
+    assert.equal(resWait.action.type, 'HANDLE_GREETING');
+    assert.equal(resWait.responseText, "No problem, take your time. I'm listening.");
+
+    const resHold = await processUserTurn(
+      { userUtterance: 'hold on', currentState: state },
+      createMockClient({ userIntent: 'GREETING' })
+    );
+    assert.equal(resHold.action.type, 'HANDLE_GREETING');
+    assert.equal(resHold.responseText, "No problem, take your time. I'm listening.");
+
+    const resListen = await processUserTurn(
+      { userUtterance: "I'm listening", currentState: state },
+      createMockClient({ userIntent: 'GREETING' })
+    );
+    assert.equal(resListen.action.type, 'HANDLE_GREETING');
+    assert.equal(resListen.responseText, "No problem, take your time. I'm listening.");
+  });
+
+  // 40. parseLocalDelta integration: "I want to book a Porter" triggers booking flow
+  it('40. parseLocalDelta integration: "I want to book a Porter" triggers booking flow', async () => {
+    const state = createInitialBookingState();
+    const localDelta = parseLocalDelta('I want to book a Porter');
+    assert.equal(localDelta.userIntent, 'BOOKING');
+
+    const res = await processUserTurn(
+      { userUtterance: 'I want to book a Porter', currentState: state },
+      createMockClient(localDelta)
+    );
+    assert.equal(res.action.type, 'ASK_FOR_MISSING_INFORMATION');
+    assert.equal(res.responseText, 'Sure! Where should we pick the items up from, and where are they going?');
   });
 });

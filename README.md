@@ -2,6 +2,8 @@
 
 > A production-ready, voice-native conversational booking assistant for Porter logistics, built with Next.js, React, TypeScript, and a deterministic state reducer architecture that guarantees zero hallucinations.
 
+**Live Demo**: Not deployed yet
+
 ---
 
 ## 1. Overview & System Objectives
@@ -242,16 +244,52 @@ The application is thoroughly verified against 13 evaluator scenarios:
 
 ---
 
-## 9. Deployment Guide
+## Deployment
+
+- **Live Demo**: Not deployed yet
 
 ### Deploying to Vercel
-The project is built for zero-config deployment on Vercel:
-1. Push the repository to GitHub.
+The project is built for zero-configuration deployment on Vercel:
+1. Push the repository to GitHub: `https://github.com/alantamaria/Porter-ai-voice-booking-agent.git`
 2. Import the project in the [Vercel Dashboard](https://vercel.com).
-3. Set the environment variables:
-   - `GROQ_API_KEY` (optional)
-   - `OPENAI_API_KEY` (optional)
-4. Deploy. Vercel automatically configures HTTPS (enabling microphone access).
+3. Set optional environment variables:
+   - `GROQ_API_KEY` (optional, recommended for fast LLM extraction)
+   - `OPENAI_API_KEY` (optional fallback)
+4. Deploy. Vercel automatically configures HTTPS, which is required for browser microphone access.
+
+---
+
+## Assumptions
+
+The domain rules, validation heuristics, and logistics models in the application enforce the following concrete assumptions:
+
+- **Supported Service Area**: The agent services intra-city relocations and deliveries strictly within active operational hubs (Bengaluru and Kochi). Inter-city routes (e.g., Bengaluru to Kochi) and out-of-scope or international destinations are rejected as unserviceable.
+- **Vehicle Fleet & Capacity Bounds**: Vehicle sizing is calculated deterministically from item catalog volume ratings and quantities:
+  - **2-Wheeler**: $\le 25\text{ cu ft}$, $\le 30\text{ kg}$ (small parcels, documents)
+  - **3-Wheeler**: $\le 60\text{ cu ft}$, $\le 150\text{ kg}$ (small loads, up to 10 boxes)
+  - **Tata Ace (Chota Hathi)**: $\le 240\text{ cu ft}$, $\le 850\text{ kg}$ (studio / 1 BHK move)
+  - **8ft Pickup Truck**: $\le 400\text{ cu ft}$, $\le 1250\text{ kg}$ (2 BHK move)
+  - **14ft Canter Truck**: $\le 600\text{ cu ft}$, $\le 2500\text{ kg}$ (3 BHK / large move)
+  - **Overload Ceiling**: Cargo exceeding $2500\text{ kg}$ or $600\text{ cu ft}$ is classified as `UNSERVICEABLE_OVERLOAD` and blocked from booking confirmation.
+- **Floor & Elevator Accessibility**:
+  - Ground floor moves (floor 0) require no elevator check.
+  - Floors $> 0$ mandate explicit confirmation of elevator availability before booking requirements are considered complete.
+  - Multi-floor moves involving stairs without an elevator automatically allocate additional helper assistants.
+- **Booking Guardrails**:
+  - **Schedule**: Booking dates must be greater than or equal to the current calendar date; past dates are rejected. Vague times (e.g., "evening") require clarification of an exact time window.
+  - **Route**: Pickup and drop-off locations must be distinct; identical addresses are rejected.
+  - **Inventory**: Vague cargo descriptions (e.g., "a few things", "some stuff") cannot be confirmed until the user itemizes concrete items and quantities.
+  - **Prohibited Goods**: Safety regulations block hazardous goods, flammable substances (petrol, diesel, gas cylinders), fireworks, weapons, live animals, cash, and alcohol.
+
+---
+
+## Known Limitations
+
+- **Web Speech API Browser Support**: Real-time voice interaction relies on the browser's native Web Speech API (`webkitSpeechRecognition` / `SpeechRecognition` and `window.speechSynthesis`). Full voice functionality is supported on Chromium-based browsers (Google Chrome, Microsoft Edge) and Safari. Browsers lacking Web Speech recognition (e.g., desktop Firefox) automatically default to the synchronized text fallback input.
+- **HTTPS Requirement for Microphone Access**: Modern browsers strictly require a secure context (`HTTPS`) to grant microphone access. When running on `localhost`, browsers treat the origin as secure; production deployments must be served over HTTPS.
+- **Intra-City Operational Scope**: The current routing engine is scoped exclusively to intra-city logistics in designated pilot hubs (Bengaluru and Kochi). Multi-city, inter-state, or international shipping is outside the application's operational boundary.
+- **Session-Scoped In-Memory State**: Booking state and conversation histories are tracked in-memory per session. A page reload resets the session to a clean initial state (no persistent database storage).
+- **Acoustic & Transcription Variations**: Highly accented speech or environments with heavy background noise may produce STT mis-transcriptions. The system provides phonetic normalizers for known Indian locations, but unresolvable audio turns trigger clarification requests or allow users to correct details via voice or text fallback.
 
 ---
 

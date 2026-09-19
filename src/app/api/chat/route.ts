@@ -40,6 +40,9 @@ export async function POST(req: NextRequest) {
       }));
     }
 
+    console.log(`\n🎙️ [Porter Chat API] Incoming Turn: "${message}"`);
+    console.log(`   ├─ Session: ${sessionId || 'default-session'} | Current Phase: ${state.phase}`);
+
     // Run Step 4 Conversation Manager Orchestration Pipeline
     const result = await processUserTurn(
       {
@@ -56,6 +59,13 @@ export async function POST(req: NextRequest) {
       result.action.type === 'REQUEST_CONFIRMATION' ||
       result.updatedState.phase === 'REQUIREMENTS_REVIEW';
 
+    const processingTime = Date.now() - startTime;
+    console.log(`   ├─ Action Chosen: ${result.action.type}`);
+    console.log(`   ├─ Updated Phase: ${result.updatedState.phase} (Completion: ${result.updatedState.metadata.completionScore}%)`);
+    console.log(`   ├─ Missing Fields: [${result.updatedState.metadata.missingMandatoryFields.join(', ') || 'none'}]`);
+    console.log(`   ├─ Agent Reply: "${result.responseText}"`);
+    console.log(`   └─ Model: ${result.metadata?.modelUsed || 'conversation-manager'} | Latency: ${processingTime}ms\n`);
+
     const responsePayload: ChatApiResponse = {
       reply: result.responseText,
       updatedState: result.updatedState,
@@ -69,7 +79,7 @@ export async function POST(req: NextRequest) {
         extractorDelta: {
           userIntent: result.updatedState.phase === 'BOOKING_CONFIRMED' ? 'CONFIRMATION' : 'PROVIDE_INFORMATION'
         },
-        processingTimeMs: Date.now() - startTime,
+        processingTimeMs: processingTime,
         modelUsed: result.metadata?.modelUsed || 'conversation-manager'
       }
     };

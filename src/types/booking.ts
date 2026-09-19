@@ -262,6 +262,7 @@ export type UserIntent =
   | 'CANCELLATION'
   | 'RESTART'
   | 'OFF_TOPIC'
+  | 'GREETING'
   | 'UNKNOWN'
   // Backward compatibility aliases
   | 'BOOKING_INQUIRY'
@@ -343,6 +344,7 @@ export interface ChatApiResponse {
  */
 export type ConversationActionType =
   | 'GREET'
+  | 'HANDLE_GREETING'
   | 'ASK_FOR_MISSING_INFORMATION'
   | 'ASK_FOR_CLARIFICATION'
   | 'ACKNOWLEDGE_CORRECTION'

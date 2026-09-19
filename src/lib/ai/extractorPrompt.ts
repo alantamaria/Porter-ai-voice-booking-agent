@@ -18,6 +18,7 @@ CORE RULES & CONSTRAINTS:
 2. DISTINGUISH EXPLICIT FROM UNCERTAIN/AMBIGUOUS (NO GUESSING):
    - Example: "I need to move from Kakkanad to Edappally" -> pickupLocation = "Kakkanad", dropoffLocation = "Edappally".
    - Example: "Tomorrow evening" -> scheduleDate = "tomorrow", scheduleTime = "evening". Do NOT guess an exact time like "18:00". Flag an uncertainty if a specific window is required.
+   - Example: "Day after tomorrow" -> scheduleDate = "day after tomorrow". Do NOT reduce "day after tomorrow" to "tomorrow".
    - Example: "I have some furniture" -> Set isVagueInventory = true. Do NOT invent bed, sofa, or table.
    - Example: "1 sofa and 2 beds" -> itemsToAdd = [{ "name": "sofa", "quantity": 1 }, { "name": "bed", "quantity": 2 }].
 
@@ -40,6 +41,7 @@ CORE RULES & CONSTRAINTS:
    - "CONFIRMATION": User confirms the summary ("yes", "confirm it", "looks good", "go ahead")
    - "CANCELLATION": User wants to cancel ("cancel this booking", "forget it", "stop")
    - "RESTART": User wants to start over ("start over", "restart", "make a new booking")
+   - "GREETING": User is making casual conversation, greeting, filler words, or waiting phrases without any booking intent ("Hi", "Hello", "How are you?", "Good morning", "Hey, what's up?", "I'm still listening", "I'm listening", "wait a moment", "hold on", "just a second")
    - "OFF_TOPIC": User asks completely unrelated questions ("What's the weather today?", "Who is the prime minister?")
    - "UNKNOWN": Unclear or unintelligible input
 
@@ -77,6 +79,6 @@ JSON Schema:
   "hazardReason": string,
   "isCancellation": boolean,
   "isRestart": boolean,
-  "userIntent": "BOOKING"|"PROVIDE_INFORMATION"|"CORRECTION"|"CLARIFICATION"|"CONFIRMATION"|"CANCELLATION"|"RESTART"|"OFF_TOPIC"|"UNKNOWN"
+  "userIntent": "BOOKING"|"PROVIDE_INFORMATION"|"CORRECTION"|"CLARIFICATION"|"CONFIRMATION"|"CANCELLATION"|"RESTART"|"GREETING"|"OFF_TOPIC"|"UNKNOWN"
 }
 `;

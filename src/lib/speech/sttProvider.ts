@@ -54,9 +54,13 @@ export class BrowserSTTProvider implements ISpeechToTextProvider {
 
         rec.onerror = (event: SpeechRecognitionErrorEventLike) => {
           this.listening = false;
-          if (event.error === 'not-allowed') {
+          if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
             this.errorCallback?.("I can't access the microphone. Please check your browser microphone permission.");
-          } else if (event.error !== 'no-speech') {
+          } else if (event.error === 'network') {
+            // Chrome Web Speech API cloud socket timeout / disconnect:
+            // Recover cleanly without showing an intrusive error tab to the user
+            console.warn('Speech recognition network socket timed out or disconnected. Recovering cleanly...');
+          } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
             this.errorCallback?.(`Speech recognition error: ${event.error}`);
           }
         };

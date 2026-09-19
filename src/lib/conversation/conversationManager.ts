@@ -82,6 +82,67 @@ function getNextMissingPrompt(state: BookingState): string {
 }
 
 /**
+ * Checks whether a StateDelta contains any actual booking-relevant data.
+ * Returns true if the delta includes location, date, time, items, corrections,
+ * or an explicit booking intent — i.e., the user provided actual booking information.
+ * Returns false if the delta is effectively empty from a booking perspective
+ * (e.g., user said "I'm still listening" — no fields extracted).
+ */
+function deltaContainsBookingData(delta: StateDelta): boolean {
+  // Explicit booking intent
+  if (delta.userIntent === 'BOOKING' || delta.userIntent === 'BOOKING_INQUIRY') {
+    return true;
+  }
+
+  // Location data
+  if (delta.pickupLocation || delta.pickup || delta.dropoffLocation || delta.dropoff) {
+    return true;
+  }
+
+  // Schedule data
+  if (delta.scheduleDate || delta.date || delta.scheduleTime || delta.time) {
+    return true;
+  }
+
+  // Inventory data
+  if (
+    (delta.itemsToAdd && delta.itemsToAdd.length > 0) ||
+    (delta.items && delta.items.length > 0) ||
+    (delta.itemsToRemove && delta.itemsToRemove.length > 0) ||
+    delta.isVagueInventory
+  ) {
+    return true;
+  }
+
+  // Floor / elevator data
+  if (
+    delta.pickupFloor !== undefined ||
+    delta.dropoffFloor !== undefined ||
+    delta.pickupHasElevator !== undefined ||
+    delta.dropoffHasElevator !== undefined
+  ) {
+    return true;
+  }
+
+  // Contact data
+  if (delta.contactName || delta.contactPhone) {
+    return true;
+  }
+
+  // Corrections
+  if (delta.corrections && delta.corrections.length > 0) {
+    return true;
+  }
+
+  // Special requirements or helpers
+  if (delta.helpersNeeded !== undefined || (delta.specialRequirements && delta.specialRequirements.length > 0)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * STEP 4: Deterministic Next-Action Selection (Section 4)
  * Priority:
  * 1. Cancellation / Restart
@@ -89,7 +150,9 @@ function getNextMissingPrompt(state: BookingState): string {
  * 3. Blocking ambiguity / uncertainty
  * 4. Explicit correction acknowledgement
  * 5. Off-topic handling and recovery
+ * 5.5. Greeting / casual / filler handling
  * 6. Genuinely missing mandatory information (never ask for known info!)
+ * 6.5. Safety net: empty delta with no booking data -> conversational response
  * 7. Completeness -> Requirements Review / Confirmation
  */
 export function determineNextAction(
@@ -222,6 +285,14 @@ export function determineNextAction(
     };
   }
 
+  // 5.5 Greeting / casual conversation handling
+  // If the user is just greeting (no booking data provided yet), respond naturally
+  if (latestDelta?.userIntent === 'GREETING') {
+    return {
+      type: 'HANDLE_GREETING'
+    };
+  }
+
   // 6. Genuinely missing mandatory information (NO fixed questionnaire!)
   const missing = getMissingMandatoryFields(state);
 
@@ -263,6 +334,22 @@ export function determineNextAction(
 
   // Still missing mandatory fields: select contextually appropriate next question
   if (missing.length > 0) {
+    // 6.5 Systemic safety net: If the latest delta didn't contribute ANY booking data
+    // and the intent was just the default PROVIDE_INFORMATION (not explicit BOOKING),
+    // don't push the booking flow — respond conversationally.
+    // This prevents non-booking utterances like "I'm still listening" from triggering booking prompts.
+    if (latestDelta && !deltaContainsBookingData(latestDelta)) {
+      const isDefaultIntent =
+        latestDelta.userIntent === 'PROVIDE_INFORMATION' ||
+        latestDelta.userIntent === 'PROVIDING_INFO' ||
+        latestDelta.userIntent === 'UNKNOWN' ||
+        !latestDelta.userIntent;
+
+      if (isDefaultIntent) {
+        return { type: 'HANDLE_GREETING' };
+      }
+    }
+
     // Combine pickup and dropoff if both missing
     if (missing.includes('pickup') && missing.includes('dropoff')) {
       return {
@@ -309,6 +396,25 @@ export function generateDeterministicFallbackResponse(
   switch (action.type) {
     case 'GREET':
       return "Hello! I'm your Porter assistant. Where are we moving from and to today?";
+
+    case 'HANDLE_GREETING': {
+      const utterance = (state.metadata?.lastUserUtterance || '').toLowerCase();
+      const isWaitingOrFiller =
+        utterance.includes('listening') ||
+        utterance.includes('wait') ||
+        utterance.includes('hold on') ||
+        utterance.includes('hang on') ||
+        utterance.includes('minute') ||
+        utterance.includes('second') ||
+        utterance.includes('moment') ||
+        utterance.includes('let me think') ||
+        utterance.includes('just a sec');
+
+      if (isWaitingOrFiller) {
+        return "No problem, take your time. I'm listening.";
+      }
+      return "Hi there! I'm doing well, thank you for asking. I'm your Porter moving assistant — whenever you're ready to book a move, just let me know!";
+    }
 
     case 'ASK_FOR_MISSING_INFORMATION': {
       const target = action.payload?.targetField;
